@@ -23,6 +23,7 @@ import {
   analyzeAging,
   analyzeContracts,
   shapeCustomers,
+  shapeInvoices,
   shapeTrialBalance,
 } from "./helpers.js";
 
@@ -445,6 +446,51 @@ server.registerTool(
       };
     } catch (err) {
       return errorResult("trial_balance", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_invoices",
+  {
+    description:
+      "Retrieve invoices with filtering by status, date range, client, and search query. Returns summary with totals and breakdown by status. Status values: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, sent, or aging buckets (1_30, 31_60, 61_90, 91_120, over_120).",
+    inputSchema: {
+      status: z.string().optional().describe("Filter by status: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, 1_30, 31_60, 61_90, 91_120, over_120"),
+      startDate: z.string().optional().describe("Filter invoices on or after this date (YYYY-MM-DD)"),
+      endDate: z.string().optional().describe("Filter invoices on or before this date (YYYY-MM-DD)"),
+      clientId: z.number().optional().describe("Filter by client ID"),
+      q: z.string().optional().describe("Search invoice numbers, addresses, client names"),
+      limit: z.number().optional().describe("Max results (default: 50)"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ status, startDate, endDate, clientId, q, limit, offset }) => {
+    try {
+      const resp = await (arApi as any).coaApiV1InvoiceList(
+        clientId,       // client
+        undefined,      // contract
+        undefined,      // currency
+        undefined,      // download
+        endDate,        // endDate
+        undefined,      // entity
+        undefined,      // invoiceNumber
+        limit ?? 50,    // limit
+        offset ?? 0,    // offset
+        q,              // q
+        undefined,      // refNumber
+        undefined,      // sentStatus
+        undefined,      // sort
+        startDate,      // startDate
+        status,         // status
+      );
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeInvoices(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_invoices", err);
     }
   }
 );
