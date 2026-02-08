@@ -356,6 +356,74 @@ export function shapeCustomers(customers: any[]): CustomerSummary {
   };
 }
 
+// --- Invoice shaping ---
+
+export interface InvoiceSummary {
+  totalInvoices: number;
+  totalAmount: number;
+  totalPaid: number;
+  totalDue: number;
+  byStatus: Record<string, { count: number; totalAmount: number; totalDue: number }>;
+  invoices: any[];
+}
+
+export function shapeInvoices(invoices: any[]): InvoiceSummary {
+  let totalAmount = 0;
+  let totalPaid = 0;
+  let totalDue = 0;
+  const byStatus: Record<string, { count: number; totalAmount: number; totalDue: number }> = {};
+
+  const shaped = invoices.map((inv: any) => {
+    const amount = Number(inv.totalAmount ?? inv.total_amount ?? 0);
+    const paid = Number(inv.amountPaid ?? inv.amount_paid ?? 0);
+    const due = Number(inv.amountDue ?? inv.amount_due ?? 0);
+    totalAmount += amount;
+    totalPaid += paid;
+    totalDue += due;
+
+    const status = inv.status ?? "unknown";
+    if (!byStatus[status]) {
+      byStatus[status] = { count: 0, totalAmount: 0, totalDue: 0 };
+    }
+    byStatus[status].count++;
+    byStatus[status].totalAmount += amount;
+    byStatus[status].totalDue += due;
+
+    return {
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber ?? inv.invoice_number,
+      clientName: inv.clientName ?? inv.client_name,
+      contractName: inv.contractName ?? inv.contract_name,
+      entityName: inv.entityName ?? inv.entity_name,
+      status,
+      invoiceDate: inv.invoiceDate ?? inv.invoice_date,
+      dueDate: inv.dueDate ?? inv.due_date,
+      paidDate: inv.paidDate ?? inv.paid_date,
+      totalAmount: amount,
+      amountPaid: paid,
+      amountDue: due,
+      pastDueDays: Number(inv.pastDueDays ?? inv.past_due_days ?? 0),
+      currency: inv.currency ?? inv.entityCurrency ?? inv.entity_currency,
+      paymentTerms: inv.paymentTermName ?? inv.payment_term_name,
+    };
+  });
+
+  // Round status bucket totals
+  for (const b of Object.values(byStatus)) {
+    b.totalAmount = round(b.totalAmount);
+    b.totalDue = round(b.totalDue);
+  }
+
+  return {
+    totalInvoices: invoices.length,
+    totalAmount: round(totalAmount),
+    totalPaid: round(totalPaid),
+    totalDue: round(totalDue),
+    byStatus,
+    invoices: shaped,
+  };
+}
+
 // --- Trial balance shaping ---
 
 export interface TrialBalanceSummary {

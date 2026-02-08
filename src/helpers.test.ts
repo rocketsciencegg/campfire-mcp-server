@@ -9,6 +9,7 @@ import {
   analyzeAging,
   analyzeContracts,
   shapeCustomers,
+  shapeInvoices,
   shapeTrialBalance,
 } from "./helpers.js";
 
@@ -599,6 +600,155 @@ describe("shapeCustomers", () => {
     expect(result.customers[0].totalMrr).toBe(0);
     expect(result.customers[0].activeContracts).toBe(0);
     expect(result.totalRevenue).toBe(0);
+  });
+});
+
+// --- Invoice shaping ---
+
+describe("shapeInvoices", () => {
+  const invoices = [
+    {
+      id: 101,
+      invoiceNumber: "INV-001",
+      clientName: "Acme Corp",
+      contractName: "Project Alpha",
+      entityName: "Main Entity",
+      status: "unpaid",
+      invoiceDate: "2026-01-15",
+      dueDate: "2026-02-14",
+      totalAmount: 10000,
+      amountPaid: 0,
+      amountDue: 10000,
+      pastDueDays: 0,
+      currency: "USD",
+      paymentTermName: "Net 30",
+    },
+    {
+      id: 102,
+      invoiceNumber: "INV-002",
+      clientName: "Beta Inc",
+      contractName: "Project Beta",
+      entityName: "Main Entity",
+      status: "paid",
+      invoiceDate: "2025-12-01",
+      dueDate: "2025-12-31",
+      paidDate: "2025-12-28",
+      totalAmount: 5000,
+      amountPaid: 5000,
+      amountDue: 0,
+      pastDueDays: 0,
+      currency: "USD",
+      paymentTermName: "Net 30",
+    },
+    {
+      id: 103,
+      invoiceNumber: "INV-003",
+      clientName: "Acme Corp",
+      contractName: "Project Alpha",
+      entityName: "Main Entity",
+      status: "unpaid",
+      invoiceDate: "2025-11-01",
+      dueDate: "2025-12-01",
+      totalAmount: 8000,
+      amountPaid: 0,
+      amountDue: 8000,
+      pastDueDays: 69,
+      currency: "USD",
+      paymentTermName: "Net 30",
+    },
+  ];
+
+  it("computes aggregate totals", () => {
+    const result = shapeInvoices(invoices);
+    expect(result.totalInvoices).toBe(3);
+    expect(result.totalAmount).toBe(23000);
+    expect(result.totalPaid).toBe(5000);
+    expect(result.totalDue).toBe(18000);
+  });
+
+  it("groups by status", () => {
+    const result = shapeInvoices(invoices);
+    expect(result.byStatus["unpaid"].count).toBe(2);
+    expect(result.byStatus["unpaid"].totalAmount).toBe(18000);
+    expect(result.byStatus["unpaid"].totalDue).toBe(18000);
+    expect(result.byStatus["paid"].count).toBe(1);
+    expect(result.byStatus["paid"].totalAmount).toBe(5000);
+    expect(result.byStatus["paid"].totalDue).toBe(0);
+  });
+
+  it("shapes individual invoice fields", () => {
+    const result = shapeInvoices(invoices);
+    expect(result.invoices[0].invoiceNumber).toBe("INV-001");
+    expect(result.invoices[0].clientName).toBe("Acme Corp");
+    expect(result.invoices[0].contractName).toBe("Project Alpha");
+    expect(result.invoices[0].status).toBe("unpaid");
+    expect(result.invoices[0].totalAmount).toBe(10000);
+    expect(result.invoices[0].amountDue).toBe(10000);
+    expect(result.invoices[0].paymentTerms).toBe("Net 30");
+  });
+
+  it("includes past due days", () => {
+    const result = shapeInvoices(invoices);
+    expect(result.invoices[2].pastDueDays).toBe(69);
+  });
+
+  it("handles snake_case field names", () => {
+    const result = shapeInvoices([
+      {
+        id: 200,
+        invoice_number: "INV-200",
+        client_name: "Snake Client",
+        contract_name: "Snake Contract",
+        entity_name: "Snake Entity",
+        status: "partially_paid",
+        invoice_date: "2026-01-01",
+        due_date: "2026-01-31",
+        paid_date: "2026-01-20",
+        total_amount: 6000,
+        amount_paid: 2000,
+        amount_due: 4000,
+        past_due_days: 8,
+        entity_currency: "EUR",
+        payment_term_name: "Net 15",
+      },
+    ]);
+    expect(result.invoices[0].invoiceNumber).toBe("INV-200");
+    expect(result.invoices[0].clientName).toBe("Snake Client");
+    expect(result.invoices[0].contractName).toBe("Snake Contract");
+    expect(result.invoices[0].entityName).toBe("Snake Entity");
+    expect(result.invoices[0].totalAmount).toBe(6000);
+    expect(result.invoices[0].amountPaid).toBe(2000);
+    expect(result.invoices[0].amountDue).toBe(4000);
+    expect(result.invoices[0].pastDueDays).toBe(8);
+    expect(result.invoices[0].currency).toBe("EUR");
+    expect(result.invoices[0].paymentTerms).toBe("Net 15");
+    expect(result.totalPaid).toBe(2000);
+    expect(result.totalDue).toBe(4000);
+  });
+
+  it("handles empty invoice list", () => {
+    const result = shapeInvoices([]);
+    expect(result.totalInvoices).toBe(0);
+    expect(result.totalAmount).toBe(0);
+    expect(result.totalPaid).toBe(0);
+    expect(result.totalDue).toBe(0);
+    expect(result.invoices).toHaveLength(0);
+  });
+
+  it("handles missing numeric fields gracefully", () => {
+    const result = shapeInvoices([{ id: 999, status: "draft" }]);
+    expect(result.invoices[0].totalAmount).toBe(0);
+    expect(result.invoices[0].amountPaid).toBe(0);
+    expect(result.invoices[0].amountDue).toBe(0);
+    expect(result.invoices[0].pastDueDays).toBe(0);
+    expect(result.totalAmount).toBe(0);
+    expect(result.byStatus["draft"].count).toBe(1);
+  });
+
+  it("defaults status to unknown when missing", () => {
+    const result = shapeInvoices([{ id: 888, totalAmount: 1000, amountDue: 1000 }]);
+    expect(result.invoices[0].status).toBe("unknown");
+    expect(result.byStatus["unknown"].count).toBe(1);
   });
 });
 
