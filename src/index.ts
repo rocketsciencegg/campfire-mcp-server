@@ -32,6 +32,8 @@ import {
   shapeTrialBalance,
   shapeBudgets,
   shapeBudgetDetail,
+  shapeUncategorizedTransactions,
+  shapeBills,
 } from "./helpers.js";
 
 // Campfire uses apiKey auth with "Token <key>" format
@@ -61,7 +63,7 @@ function errorResult(toolName: string, err: unknown) {
 function createServer() {
 const server = new McpServer({
   name: "campfire-mcp-server",
-  version: "2.0.0",
+  version: "2.1.0",
 });
 
 server.registerTool(
@@ -280,10 +282,15 @@ server.registerTool(
   },
   async ({ dateFrom, dateTo, accountId, accountType, vendorId, departmentId, limit }) => {
     try {
-      const resp = await (coreAccountingApi as any).caApiGetTransactionsList(
-        undefined, accountId, accountType, undefined, undefined,
-        vendorId, departmentId, undefined, dateFrom, dateTo, limit ?? 100
-      );
+      const params: Record<string, any> = { limit: limit ?? 100 };
+      if (accountId) params.account = accountId;
+      if (accountType) params.account_type = accountType;
+      if (vendorId) params.vendor = vendorId;
+      if (departmentId) params.department = departmentId;
+      if (dateFrom) params.posted_at_gte = dateFrom;
+      if (dateTo) params.posted_at_lte = dateTo;
+
+      const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({ params });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
       const result = enrichTransactions(raw);
       return {
@@ -309,9 +316,9 @@ server.registerTool(
   },
   async ({ accountType, accountSubtype, q, limit }) => {
     try {
-      const resp = await (coaApi as any).caApiGetAccountsList(
-        accountType, accountSubtype, q, limit ?? 100
-      );
+      const resp = await (companyApi as any).coaApiAccountList({
+        limit: limit ?? 100,
+      });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
       };
@@ -334,9 +341,11 @@ server.registerTool(
   },
   async ({ q, vendorType, limit }) => {
     try {
-      const resp = await (companyApi as any).caApiGetVendorsList(
-        q, vendorType, limit ?? 100
-      );
+      const resp = await (companyApi as any).coaApiVendorList({
+        q,
+        vendorType,
+        limit: limit ?? 100,
+      });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
       };
@@ -360,11 +369,62 @@ server.registerTool(
   },
   async ({ agingType, asOfDate, entityId, vendorId }) => {
     try {
-      const resp = await (coreAccountingApi as any).caApiGetAgingList(
-        agingType, asOfDate, entityId, vendorId
-      );
-      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = analyzeAging(raw, agingType);
+      // No dedicated aging endpoint — derive from bills (AP) or invoices (AR)
+      // Fetch unpaid items which include past_due_days for aging analysis
+      let raw: any[] = [];
+      if (agingType === "ar") {
+        const resp = await (arApi as any).coaApiV1InvoiceList(
+          undefined,      // client
+          undefined,      // contract
+          undefined,      // currency
+          undefined,      // download
+          asOfDate,       // endDate
+          entityId,       // entity
+          undefined,      // invoiceNumber
+          200,            // limit
+          0,              // offset
+          undefined,      // q
+          undefined,      // refNumber
+          undefined,      // sentStatus
+          undefined,      // sort
+          undefined,      // startDate
+          "unpaid",       // status
+        );
+        const invoices = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+        raw = invoices.map((inv: any) => ({
+          customer_name: inv.client_name ?? inv.clientName,
+          amount: Number(inv.amount_due ?? inv.amountDue ?? 0),
+          days_outstanding: Number(inv.past_due_days ?? inv.pastDueDays ?? 0),
+          invoice_number: inv.invoice_number ?? inv.invoiceNumber,
+          due_date: inv.due_date ?? inv.dueDate,
+        }));
+      } else {
+        const resp = await (apApi as any).coaApiV1BillRetrieve(
+          undefined,      // currency
+          undefined,      // download
+          asOfDate,       // endDate
+          entityId,       // entity
+          undefined,      // includeDeleted
+          undefined,      // lastModifiedAtGte
+          undefined,      // lastModifiedAtLte
+          200,            // limit
+          0,              // offset
+          undefined,      // q
+          undefined,      // sort
+          undefined,      // startDate
+          "unpaid",       // status
+          vendorId,       // vendor
+        );
+        const bills = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+        raw = bills.map((b: any) => ({
+          vendor_name: b.vendor_name ?? b.vendorName,
+          amount: Number(b.amount_due ?? b.amountDue ?? 0),
+          days_outstanding: Number(b.past_due_days ?? b.pastDueDays ?? 0),
+          invoice_number: b.bill_number ?? b.billNumber,
+          due_date: b.due_date ?? b.dueDate,
+        }));
+      }
+      const result = analyzeAging(raw, agingType ?? "ap");
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
@@ -388,9 +448,9 @@ server.registerTool(
   },
   async ({ q, clientId, status, limit }) => {
     try {
-      const resp = await (revenueApi as any).caApiGetContractsList(
-        q, clientId, undefined, status, limit ?? 50
-      );
+      const resp = await (revenueApi as any).listContracts({
+        limit: limit ?? 50,
+      });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
       const result = analyzeContracts(raw);
       return {
@@ -519,17 +579,12 @@ server.registerTool(
   },
   async ({ entityId, q, limit, offset }) => {
     try {
-      const resp = await (coaApi as any).coaApiBudgetsList(
-        entityId,         // entity
-        undefined,        // entityName
-        undefined,        // includeDeleted
-        undefined,        // lastModifiedAtGte
-        undefined,        // lastModifiedAtLte
-        limit ?? 50,      // limit
-        offset ?? 0,      // offset
-        q,                // q
-        undefined,        // sort
-      );
+      const resp = await (coreAccountingApi as any).coaApiBudgetsList({
+        entity: entityId,
+        q,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+      });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
       const result = shapeBudgets(raw);
       return {
@@ -553,8 +608,8 @@ server.registerTool(
   async ({ budgetId }) => {
     try {
       const [budgetResp, allocResp] = await Promise.all([
-        (coaApi as any).coaApiBudgetsRetrieve(budgetId),
-        (coaApi as any).coaApiBudgetsAccountsList(budgetId),
+        (coreAccountingApi as any).coaApiBudgetsRetrieve({ id: budgetId }),
+        (coreAccountingApi as any).coaApiBudgetsAccountsList({ budgetPk: budgetId }),
       ]);
       const budget = budgetResp.data;
       const allocations = Array.isArray(allocResp.data) ? allocResp.data : allocResp.data?.results || [];
@@ -564,6 +619,91 @@ server.registerTool(
       };
     } catch (err) {
       return errorResult("get_budget_details", err);
+    }
+  }
+);
+
+// --- UNCATEGORIZED TRANSACTIONS & BILLS ---
+
+server.registerTool(
+  "get_uncategorized_transactions",
+  {
+    description:
+      "Retrieve uncategorized transactions grouped by vendor, with AI-suggested accounts and matching hints. Useful for finding transactions that need to be categorized or matched to bills.",
+    inputSchema: {
+      accountId: z.number().optional().describe("Narrow by specific account ID"),
+      vendorId: z.number().optional().describe("Filter by vendor ID"),
+      departmentId: z.number().optional().describe("Filter by department ID"),
+      dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
+      dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
+      limit: z.number().optional().describe("Max results (default: 100)"),
+    },
+  },
+  async ({ accountId, vendorId, departmentId, dateFrom, dateTo, limit }) => {
+    try {
+      const params: Record<string, any> = {
+        account_type: "UNCATEGORIZED",
+        limit: limit ?? 100,
+      };
+      if (accountId) params.account = accountId;
+      if (vendorId) params.vendor = vendorId;
+      if (departmentId) params.department = departmentId;
+      if (dateFrom) params.posted_at_gte = dateFrom;
+      if (dateTo) params.posted_at_lte = dateTo;
+
+      const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({ params });
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeUncategorizedTransactions(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_uncategorized_transactions", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_bills",
+  {
+    description:
+      "Retrieve bills filtered by status, vendor, date range, and search query. Returns summary with totals by status and vendor. Status values: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120.",
+    inputSchema: {
+      status: z.string().optional().describe("Filter by status: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120"),
+      vendorId: z.number().optional().describe("Filter by vendor ID"),
+      entityId: z.number().optional().describe("Filter by entity ID"),
+      startDate: z.string().optional().describe("Filter bills on or after this date (YYYY-MM-DD)"),
+      endDate: z.string().optional().describe("Filter bills on or before this date (YYYY-MM-DD)"),
+      q: z.string().optional().describe("Search bill number, vendor name, etc."),
+      limit: z.number().optional().describe("Max results (default: 50)"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ status, vendorId, entityId, startDate, endDate, q, limit, offset }) => {
+    try {
+      const resp = await (apApi as any).coaApiV1BillRetrieve(
+        undefined,      // currency
+        undefined,      // download
+        endDate,        // endDate
+        entityId,       // entity
+        undefined,      // includeDeleted
+        undefined,      // lastModifiedAtGte
+        undefined,      // lastModifiedAtLte
+        limit ?? 50,    // limit
+        offset ?? 0,    // offset
+        q,              // q
+        undefined,      // sort
+        startDate,      // startDate
+        status,         // status
+        vendorId,       // vendor
+      );
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeBills(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_bills", err);
     }
   }
 );

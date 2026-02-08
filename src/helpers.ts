@@ -658,6 +658,146 @@ export function shapeBudgetDetail(budget: any, allocations: any[]): BudgetDetail
   };
 }
 
+// --- Uncategorized transaction shaping ---
+
+export interface UncategorizedTransactionSummary {
+  totalCount: number;
+  totalAmount: number;
+  byVendor: Record<string, { count: number; total: number }>;
+  withSuggestions: number;
+  transactions: any[];
+}
+
+export function shapeUncategorizedTransactions(transactions: any[]): UncategorizedTransactionSummary {
+  let totalAmount = 0;
+  let withSuggestions = 0;
+  const byVendor: Record<string, { count: number; total: number }> = {};
+
+  const shaped = transactions.map((t: any) => {
+    const debit = Number(t.debit_amount ?? t.debit ?? 0);
+    const credit = Number(t.credit_amount ?? t.credit ?? 0);
+    const amount = Math.abs(debit - credit);
+    totalAmount += amount;
+
+    // The live API has vendor as an ID only; merchant_name is the human-readable name.
+    // Fall back through vendor_name → vendorName → merchant_name → merchantName → "Unknown".
+    const vendorName = t.vendor_name ?? t.vendorName
+      ?? t.merchant_name ?? t.merchantName ?? "Unknown";
+    if (!byVendor[vendorName]) byVendor[vendorName] = { count: 0, total: 0 };
+    byVendor[vendorName].count++;
+    byVendor[vendorName].total += amount;
+
+    const suggestedAccountName = t.suggested_account_name ?? t.suggestedAccountName ?? null;
+    const suggestedAccountNumber = t.suggested_account_number ?? t.suggestedAccountNumber ?? null;
+    if (suggestedAccountName || suggestedAccountNumber) withSuggestions++;
+
+    return {
+      id: t.id,
+      date: t.posted_at ?? t.date ?? t.transaction_date,
+      description: t.journal_memo ?? t.description ?? t.memo ?? t.bank_description ?? null,
+      amount,
+      debit,
+      credit,
+      vendorName,
+      departmentName: t.department_name ?? t.departmentName ?? null,
+      merchantName: t.merchant_name ?? t.merchantName ?? null,
+      bankDescription: t.bank_description ?? t.bankDescription ?? null,
+      suggestedAccountName,
+      suggestedAccountNumber,
+      billId: t.bill_id ?? t.billId ?? null,
+      billNumber: t.bill_number ?? t.billNumber ?? null,
+      needsReview: t.needs_review ?? t.needsReview ?? false,
+      hasMatches: t.has_matches ?? t.hasMatches ?? false,
+    };
+  });
+
+  // Round vendor totals
+  for (const v of Object.values(byVendor)) {
+    v.total = round(v.total);
+  }
+
+  return {
+    totalCount: transactions.length,
+    totalAmount: round(totalAmount),
+    byVendor,
+    withSuggestions,
+    transactions: shaped,
+  };
+}
+
+// --- Bill shaping ---
+
+export interface BillSummary {
+  totalBills: number;
+  totalAmount: number;
+  totalAmountDue: number;
+  totalAmountPaid: number;
+  byStatus: Record<string, { count: number; total: number }>;
+  byVendor: Record<string, { count: number; totalDue: number }>;
+  bills: any[];
+}
+
+export function shapeBills(bills: any[]): BillSummary {
+  let totalAmount = 0;
+  let totalAmountDue = 0;
+  let totalAmountPaid = 0;
+  const byStatus: Record<string, { count: number; total: number }> = {};
+  const byVendor: Record<string, { count: number; totalDue: number }> = {};
+
+  const shaped = bills.map((b: any) => {
+    const amount = Number(b.total_amount ?? b.totalAmount ?? b.amount ?? 0);
+    const amountDue = Number(b.amount_due ?? b.amountDue ?? 0);
+    const amountPaid = Number(b.amount_paid ?? b.amountPaid ?? 0);
+    totalAmount += amount;
+    totalAmountDue += amountDue;
+    totalAmountPaid += amountPaid;
+
+    const status = b.status ?? "unknown";
+    if (!byStatus[status]) byStatus[status] = { count: 0, total: 0 };
+    byStatus[status].count++;
+    byStatus[status].total += amount;
+
+    const vendorName = b.vendor_name ?? b.vendorName ?? "Unknown";
+    if (!byVendor[vendorName]) byVendor[vendorName] = { count: 0, totalDue: 0 };
+    byVendor[vendorName].count++;
+    byVendor[vendorName].totalDue += amountDue;
+
+    const lines = b.lines ?? b.line_items ?? b.lineItems ?? [];
+
+    return {
+      id: b.id,
+      billNumber: b.bill_number ?? b.billNumber ?? null,
+      billDate: b.bill_date ?? b.billDate ?? null,
+      dueDate: b.due_date ?? b.dueDate ?? null,
+      paidDate: b.paid_date ?? b.paidDate ?? null,
+      vendorName,
+      entityName: b.entity_name ?? b.entityName ?? null,
+      status,
+      pastDueDays: Number(b.past_due_days ?? b.pastDueDays ?? 0),
+      totalAmount: amount,
+      amountDue,
+      amountPaid,
+      lineCount: Array.isArray(lines) ? lines.length : 0,
+      apAccountName: b.ap_account_name ?? b.apAccountName ?? null,
+      messageOnBill: b.message_on_bill ?? b.messageOnBill ?? null,
+    };
+  });
+
+  // Round group totals
+  for (const s of Object.values(byStatus)) s.total = round(s.total);
+  for (const v of Object.values(byVendor)) v.totalDue = round(v.totalDue);
+
+  return {
+    totalBills: bills.length,
+    totalAmount: round(totalAmount),
+    totalAmountDue: round(totalAmountDue),
+    totalAmountPaid: round(totalAmountPaid),
+    byStatus,
+    byVendor,
+    bills: shaped,
+  };
+}
+
 // --- Utility ---
 
 function round(n: number, decimals = 2): number {

@@ -24,6 +24,8 @@ MCP server for Campfire — accounting and financial reporting.
 | `trial_balance` | Trial balance by account type with debit/credit totals and per-account net amounts |
 | `get_budgets` | List budgets with entity/department names resolved, cadence breakdown summary |
 | `get_budget_details` | Single budget with all account allocations grouped by account type and department, with totals |
+| `get_uncategorized_transactions` | Uncategorized transactions grouped by vendor, with AI suggestions and matching hints |
+| `get_bills` | Bills filtered by status (unpaid, open, past_due, etc.), vendor, date range; summary with totals by status and vendor |
 
 ## Installation
 
