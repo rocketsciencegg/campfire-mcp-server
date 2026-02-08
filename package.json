@@ -1,0 +1,23 @@
+{
+  "name": "campfire-mcp-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "campfire-mcp-server": "./build/index.js"
+  },
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "campfire-typescript-sdk": "github:rocketsciencegg/campfire-typescript-sdk",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}
