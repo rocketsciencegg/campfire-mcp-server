@@ -302,6 +302,125 @@ export function analyzeContracts(contracts: any[]): ContractSummary {
   };
 }
 
+// --- Customer shaping ---
+
+export interface CustomerSummary {
+  totalCustomers: number;
+  totalRevenue: number;
+  totalMrr: number;
+  totalOutstanding: number;
+  customers: any[];
+}
+
+export function shapeCustomers(customers: any[]): CustomerSummary {
+  let totalRevenue = 0;
+  let totalMrr = 0;
+  let totalOutstanding = 0;
+
+  const shaped = customers.map((c: any) => {
+    const rev = Number(c.total_revenue ?? c.totalRevenue ?? 0);
+    const mrr = Number(c.total_mrr ?? c.totalMrr ?? 0);
+    const outstanding = Number(c.total_outstanding ?? c.totalOutstanding ?? 0);
+    totalRevenue += rev;
+    totalMrr += mrr;
+    totalOutstanding += outstanding;
+
+    return {
+      id: c.id,
+      name: c.name,
+      companyName: c.company_name ?? c.companyName,
+      email: c.email,
+      phone: c.phone_number ?? c.phoneNumber,
+      currency: c.currency,
+      activeContracts: Number(c.active_contracts ?? c.activeContracts ?? 0),
+      completedContracts: Number(c.completed_contracts ?? c.completedContracts ?? 0),
+      totalContracts: Number(c.total_contracts ?? c.totalContracts ?? 0),
+      totalRevenue: rev,
+      totalMrr: mrr,
+      totalBilled: Number(c.total_billed ?? c.totalBilled ?? 0),
+      totalUnbilled: Number(c.total_unbilled ?? c.totalUnbilled ?? 0),
+      totalPaid: Number(c.total_paid ?? c.totalPaid ?? 0),
+      totalOutstanding: outstanding,
+      totalDeferredRevenue: Number(c.total_deferred_revenue ?? c.totalDeferredRevenue ?? 0),
+      paymentTerms: c.payment_term_name_display ?? c.paymentTermNameDisplay,
+      status: c.status,
+    };
+  });
+
+  return {
+    totalCustomers: customers.length,
+    totalRevenue: round(totalRevenue),
+    totalMrr: round(totalMrr),
+    totalOutstanding: round(totalOutstanding),
+    customers: shaped,
+  };
+}
+
+// --- Trial balance shaping ---
+
+export interface TrialBalanceSummary {
+  startDate: string | null;
+  endDate: string | null;
+  totalDebits: number;
+  totalCredits: number;
+  accountCount: number;
+  byAccountType: Record<string, { count: number; debits: number; credits: number }>;
+  accounts: any[];
+}
+
+export function shapeTrialBalance(data: any): TrialBalanceSummary {
+  const startDate = data?.startDate ?? data?.start_date ?? null;
+  const endDate = data?.endDate ?? data?.end_date ?? null;
+  const tb = data?.trialBalance ?? data?.trial_balance ?? data;
+  const accounts = tb?.accounts ?? [];
+
+  let totalDebits = 0;
+  let totalCredits = 0;
+  const byAccountType: Record<string, { count: number; debits: number; credits: number }> = {};
+
+  const shaped = (Array.isArray(accounts) ? accounts : []).map((a: any) => {
+    const debits = Number(a.balances?.debits ?? a.debits ?? 0);
+    const credits = Number(a.balances?.credits ?? a.credits ?? 0);
+    totalDebits += debits;
+    totalCredits += credits;
+
+    const acctType = a.accountType ?? a.account_type ?? "Unknown";
+    if (!byAccountType[acctType]) {
+      byAccountType[acctType] = { count: 0, debits: 0, credits: 0 };
+    }
+    byAccountType[acctType].count++;
+    byAccountType[acctType].debits += debits;
+    byAccountType[acctType].credits += credits;
+
+    return {
+      id: a.id,
+      name: a.name,
+      number: a.number,
+      accountType: acctType,
+      debits,
+      credits,
+      net: round(debits - credits),
+      department: a.department,
+    };
+  });
+
+  // Round bucket totals
+  for (const b of Object.values(byAccountType)) {
+    b.debits = round(b.debits);
+    b.credits = round(b.credits);
+  }
+
+  return {
+    startDate,
+    endDate,
+    totalDebits: round(totalDebits),
+    totalCredits: round(totalCredits),
+    accountCount: shaped.length,
+    byAccountType,
+    accounts: shaped,
+  };
+}
+
 // --- Utility ---
 
 /** Walk nested data looking for a matching section/row by name keywords. */

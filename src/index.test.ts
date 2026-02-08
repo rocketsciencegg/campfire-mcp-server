@@ -26,8 +26,10 @@ describe("campfire-mcp-server", () => {
       "get_vendors",
       "get_aging",
       "get_contracts",
+      "get_customers",
+      "trial_balance",
     ];
-    expect(expectedTools).toHaveLength(10);
+    expect(expectedTools).toHaveLength(12);
     for (const tool of expectedTools) {
       expect(tool).toBeTruthy();
       expect(typeof tool).toBe("string");
