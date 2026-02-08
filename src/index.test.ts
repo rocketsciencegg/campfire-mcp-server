@@ -9,7 +9,7 @@ describe("campfire-mcp-server", () => {
   it("should have correct server metadata", async () => {
     const server = new McpServer({
       name: "campfire-mcp-server",
-      version: "2.0.0",
+      version: "2.1.0",
     });
     expect(server).toBeDefined();
   });
@@ -31,8 +31,10 @@ describe("campfire-mcp-server", () => {
       "get_invoices",
       "get_budgets",
       "get_budget_details",
+      "get_uncategorized_transactions",
+      "get_bills",
     ];
-    expect(expectedTools).toHaveLength(15);
+    expect(expectedTools).toHaveLength(17);
     for (const tool of expectedTools) {
       expect(tool).toBeTruthy();
       expect(typeof tool).toBe("string");

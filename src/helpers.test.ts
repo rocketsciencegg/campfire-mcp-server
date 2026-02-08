@@ -13,6 +13,8 @@ import {
   shapeTrialBalance,
   shapeBudgets,
   shapeBudgetDetail,
+  shapeUncategorizedTransactions,
+  shapeBills,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -1101,5 +1103,381 @@ describe("shapeBudgetDetail", () => {
     ]);
     expect(result.allocations[0].amount).toBe(0);
     expect(result.totalBudgeted).toBe(0);
+  });
+});
+
+// --- Uncategorized transaction shaping ---
+
+describe("shapeUncategorizedTransactions", () => {
+  const txns = [
+    {
+      id: 1,
+      date: "2026-01-15",
+      description: "Office supplies",
+      debit_amount: 250,
+      credit_amount: 0,
+      vendor_name: "Staples",
+      department_name: "Operations",
+      merchant_name: "Staples Store #42",
+      bank_description: "POS STAPLES #42",
+      suggested_account_name: "Office Supplies",
+      suggested_account_number: "6100",
+      needs_review: true,
+      has_matches: false,
+    },
+    {
+      id: 2,
+      date: "2026-01-16",
+      description: "Software license",
+      debit_amount: 500,
+      credit_amount: 0,
+      vendor_name: "Staples",
+      suggested_account_name: "Software Expense",
+      suggested_account_number: "6200",
+    },
+    {
+      id: 3,
+      date: "2026-01-17",
+      description: "Client refund",
+      debit_amount: 0,
+      credit_amount: 1000,
+      vendor_name: "Acme Corp",
+      bill_id: 99,
+      bill_number: "BILL-099",
+      has_matches: true,
+    },
+  ];
+
+  it("computes total count and amount", () => {
+    const result = shapeUncategorizedTransactions(txns);
+    expect(result.totalCount).toBe(3);
+    // |250-0| + |500-0| + |0-1000| = 250 + 500 + 1000 = 1750
+    expect(result.totalAmount).toBe(1750);
+  });
+
+  it("groups by vendor name", () => {
+    const result = shapeUncategorizedTransactions(txns);
+    expect(result.byVendor["Staples"].count).toBe(2);
+    expect(result.byVendor["Staples"].total).toBe(750);
+    expect(result.byVendor["Acme Corp"].count).toBe(1);
+    expect(result.byVendor["Acme Corp"].total).toBe(1000);
+  });
+
+  it("counts transactions with suggestions", () => {
+    const result = shapeUncategorizedTransactions(txns);
+    expect(result.withSuggestions).toBe(2);
+  });
+
+  it("shapes individual transaction fields", () => {
+    const result = shapeUncategorizedTransactions(txns);
+    const t0 = result.transactions[0];
+    expect(t0.id).toBe(1);
+    expect(t0.date).toBe("2026-01-15");
+    expect(t0.description).toBe("Office supplies");
+    expect(t0.amount).toBe(250);
+    expect(t0.debit).toBe(250);
+    expect(t0.credit).toBe(0);
+    expect(t0.vendorName).toBe("Staples");
+    expect(t0.departmentName).toBe("Operations");
+    expect(t0.merchantName).toBe("Staples Store #42");
+    expect(t0.bankDescription).toBe("POS STAPLES #42");
+    expect(t0.suggestedAccountName).toBe("Office Supplies");
+    expect(t0.suggestedAccountNumber).toBe("6100");
+    expect(t0.needsReview).toBe(true);
+    expect(t0.hasMatches).toBe(false);
+  });
+
+  it("includes bill linkage fields", () => {
+    const result = shapeUncategorizedTransactions(txns);
+    const t2 = result.transactions[2];
+    expect(t2.billId).toBe(99);
+    expect(t2.billNumber).toBe("BILL-099");
+    expect(t2.hasMatches).toBe(true);
+  });
+
+  it("handles empty array", () => {
+    const result = shapeUncategorizedTransactions([]);
+    expect(result.totalCount).toBe(0);
+    expect(result.totalAmount).toBe(0);
+    expect(result.byVendor).toEqual({});
+    expect(result.withSuggestions).toBe(0);
+    expect(result.transactions).toHaveLength(0);
+  });
+
+  it("handles camelCase field names", () => {
+    const result = shapeUncategorizedTransactions([
+      {
+        id: 10,
+        transaction_date: "2026-02-01",
+        memo: "CamelCase test",
+        debit: 300,
+        credit: 0,
+        vendorName: "CamelVendor",
+        departmentName: "Dept1",
+        merchantName: "Merchant1",
+        bankDescription: "BANK DESC",
+        suggestedAccountName: "Suggested",
+        suggestedAccountNumber: "9999",
+        billId: 42,
+        billNumber: "B-42",
+        needsReview: false,
+        hasMatches: true,
+      },
+    ]);
+    const t = result.transactions[0];
+    expect(t.date).toBe("2026-02-01");
+    expect(t.description).toBe("CamelCase test");
+    expect(t.vendorName).toBe("CamelVendor");
+    expect(t.departmentName).toBe("Dept1");
+    expect(t.merchantName).toBe("Merchant1");
+    expect(t.bankDescription).toBe("BANK DESC");
+    expect(t.suggestedAccountName).toBe("Suggested");
+    expect(t.billId).toBe(42);
+  });
+
+  it("defaults vendorName to Unknown when missing", () => {
+    const result = shapeUncategorizedTransactions([
+      { id: 20, debit_amount: 100, credit_amount: 0 },
+    ]);
+    expect(result.transactions[0].vendorName).toBe("Unknown");
+    expect(result.byVendor["Unknown"].count).toBe(1);
+  });
+
+  it("falls back vendorName to merchant_name when vendor_name is missing", () => {
+    const result = shapeUncategorizedTransactions([
+      { id: 21, debit_amount: 50, credit_amount: 0, merchant_name: "Rmpr R Hub" },
+    ]);
+    expect(result.transactions[0].vendorName).toBe("Rmpr R Hub");
+    expect(result.byVendor["Rmpr R Hub"].count).toBe(1);
+  });
+
+  it("handles live API field names (posted_at, journal_memo)", () => {
+    const result = shapeUncategorizedTransactions([
+      {
+        id: 176037615,
+        posted_at: "2026-02-06",
+        journal_memo: "RMPR C Popescu; Operating US New",
+        bank_description: "RMPR C Popescu; Operating US New",
+        debit_amount: null,
+        credit_amount: 11.58,
+        merchant_name: null,
+        needs_review: true,
+      },
+    ]);
+    const t = result.transactions[0];
+    expect(t.date).toBe("2026-02-06");
+    expect(t.description).toBe("RMPR C Popescu; Operating US New");
+    expect(t.credit).toBe(11.58);
+    expect(t.debit).toBe(0);
+    expect(t.amount).toBe(11.58);
+    expect(t.needsReview).toBe(true);
+  });
+
+  it("defaults optional fields to null/false when missing", () => {
+    const result = shapeUncategorizedTransactions([
+      { id: 30, debit_amount: 50, credit_amount: 0 },
+    ]);
+    const t = result.transactions[0];
+    expect(t.departmentName).toBeNull();
+    expect(t.merchantName).toBeNull();
+    expect(t.bankDescription).toBeNull();
+    expect(t.suggestedAccountName).toBeNull();
+    expect(t.suggestedAccountNumber).toBeNull();
+    expect(t.billId).toBeNull();
+    expect(t.billNumber).toBeNull();
+    expect(t.needsReview).toBe(false);
+    expect(t.hasMatches).toBe(false);
+  });
+});
+
+// --- Bill shaping ---
+
+describe("shapeBills", () => {
+  const bills = [
+    {
+      id: 1,
+      bill_number: "BILL-001",
+      bill_date: "2026-01-01",
+      due_date: "2026-01-31",
+      vendor_name: "Vendor A",
+      entity_name: "Main Entity",
+      status: "unpaid",
+      past_due_days: 8,
+      total_amount: 5000,
+      amount_due: 5000,
+      amount_paid: 0,
+      lines: [{ id: 1 }, { id: 2 }],
+      ap_account_name: "Accounts Payable",
+      message_on_bill: "Please pay promptly",
+    },
+    {
+      id: 2,
+      bill_number: "BILL-002",
+      bill_date: "2025-12-01",
+      due_date: "2025-12-31",
+      paid_date: "2025-12-28",
+      vendor_name: "Vendor A",
+      entity_name: "Main Entity",
+      status: "paid",
+      total_amount: 3000,
+      amount_due: 0,
+      amount_paid: 3000,
+      lines: [{ id: 3 }],
+      ap_account_name: "Accounts Payable",
+    },
+    {
+      id: 3,
+      bill_number: "BILL-003",
+      bill_date: "2026-01-10",
+      due_date: "2026-02-09",
+      vendor_name: "Vendor B",
+      entity_name: "Main Entity",
+      status: "unpaid",
+      past_due_days: 0,
+      total_amount: 8000,
+      amount_due: 8000,
+      amount_paid: 0,
+      lines: [{ id: 4 }, { id: 5 }, { id: 6 }],
+    },
+  ];
+
+  it("computes aggregate totals", () => {
+    const result = shapeBills(bills);
+    expect(result.totalBills).toBe(3);
+    expect(result.totalAmount).toBe(16000);
+    expect(result.totalAmountDue).toBe(13000);
+    expect(result.totalAmountPaid).toBe(3000);
+  });
+
+  it("groups by status", () => {
+    const result = shapeBills(bills);
+    expect(result.byStatus["unpaid"].count).toBe(2);
+    expect(result.byStatus["unpaid"].total).toBe(13000);
+    expect(result.byStatus["paid"].count).toBe(1);
+    expect(result.byStatus["paid"].total).toBe(3000);
+  });
+
+  it("groups by vendor", () => {
+    const result = shapeBills(bills);
+    expect(result.byVendor["Vendor A"].count).toBe(2);
+    expect(result.byVendor["Vendor A"].totalDue).toBe(5000);
+    expect(result.byVendor["Vendor B"].count).toBe(1);
+    expect(result.byVendor["Vendor B"].totalDue).toBe(8000);
+  });
+
+  it("shapes individual bill fields", () => {
+    const result = shapeBills(bills);
+    const b0 = result.bills[0];
+    expect(b0.id).toBe(1);
+    expect(b0.billNumber).toBe("BILL-001");
+    expect(b0.billDate).toBe("2026-01-01");
+    expect(b0.dueDate).toBe("2026-01-31");
+    expect(b0.vendorName).toBe("Vendor A");
+    expect(b0.entityName).toBe("Main Entity");
+    expect(b0.status).toBe("unpaid");
+    expect(b0.pastDueDays).toBe(8);
+    expect(b0.totalAmount).toBe(5000);
+    expect(b0.amountDue).toBe(5000);
+    expect(b0.amountPaid).toBe(0);
+    expect(b0.lineCount).toBe(2);
+    expect(b0.apAccountName).toBe("Accounts Payable");
+    expect(b0.messageOnBill).toBe("Please pay promptly");
+  });
+
+  it("includes paid date when present", () => {
+    const result = shapeBills(bills);
+    expect(result.bills[1].paidDate).toBe("2025-12-28");
+  });
+
+  it("counts line items", () => {
+    const result = shapeBills(bills);
+    expect(result.bills[0].lineCount).toBe(2);
+    expect(result.bills[1].lineCount).toBe(1);
+    expect(result.bills[2].lineCount).toBe(3);
+  });
+
+  it("handles empty bill list", () => {
+    const result = shapeBills([]);
+    expect(result.totalBills).toBe(0);
+    expect(result.totalAmount).toBe(0);
+    expect(result.totalAmountDue).toBe(0);
+    expect(result.totalAmountPaid).toBe(0);
+    expect(result.byStatus).toEqual({});
+    expect(result.byVendor).toEqual({});
+    expect(result.bills).toHaveLength(0);
+  });
+
+  it("handles camelCase field names", () => {
+    const result = shapeBills([
+      {
+        id: 10,
+        billNumber: "B-10",
+        billDate: "2026-02-01",
+        dueDate: "2026-02-28",
+        paidDate: "2026-02-15",
+        vendorName: "CamelVendor",
+        entityName: "CamelEntity",
+        status: "paid",
+        pastDueDays: 0,
+        totalAmount: 2000,
+        amountDue: 0,
+        amountPaid: 2000,
+        lineItems: [{ id: 1 }],
+        apAccountName: "AP Account",
+        messageOnBill: "Thank you",
+      },
+    ]);
+    const b = result.bills[0];
+    expect(b.billNumber).toBe("B-10");
+    expect(b.billDate).toBe("2026-02-01");
+    expect(b.dueDate).toBe("2026-02-28");
+    expect(b.paidDate).toBe("2026-02-15");
+    expect(b.vendorName).toBe("CamelVendor");
+    expect(b.entityName).toBe("CamelEntity");
+    expect(b.totalAmount).toBe(2000);
+    expect(b.amountPaid).toBe(2000);
+    expect(b.lineCount).toBe(1);
+    expect(b.apAccountName).toBe("AP Account");
+    expect(b.messageOnBill).toBe("Thank you");
+  });
+
+  it("defaults status to unknown when missing", () => {
+    const result = shapeBills([{ id: 99, total_amount: 1000, amount_due: 1000 }]);
+    expect(result.bills[0].status).toBe("unknown");
+    expect(result.byStatus["unknown"].count).toBe(1);
+  });
+
+  it("defaults vendorName to Unknown when missing", () => {
+    const result = shapeBills([{ id: 100, total_amount: 500, amount_due: 500, status: "unpaid" }]);
+    expect(result.bills[0].vendorName).toBe("Unknown");
+    expect(result.byVendor["Unknown"].count).toBe(1);
+  });
+
+  it("handles missing numeric fields gracefully", () => {
+    const result = shapeBills([{ id: 101, status: "draft" }]);
+    expect(result.bills[0].totalAmount).toBe(0);
+    expect(result.bills[0].amountDue).toBe(0);
+    expect(result.bills[0].amountPaid).toBe(0);
+    expect(result.bills[0].pastDueDays).toBe(0);
+    expect(result.bills[0].lineCount).toBe(0);
+    expect(result.totalAmount).toBe(0);
+  });
+
+  it("handles missing optional fields as null", () => {
+    const result = shapeBills([{ id: 102, status: "open" }]);
+    const b = result.bills[0];
+    expect(b.billNumber).toBeNull();
+    expect(b.billDate).toBeNull();
+    expect(b.dueDate).toBeNull();
+    expect(b.paidDate).toBeNull();
+    expect(b.entityName).toBeNull();
+    expect(b.apAccountName).toBeNull();
+    expect(b.messageOnBill).toBeNull();
+  });
+
+  it("uses amount fallback when total_amount and totalAmount are missing", () => {
+    const result = shapeBills([{ id: 103, amount: 7500, amount_due: 7500, status: "unpaid" }]);
+    expect(result.bills[0].totalAmount).toBe(7500);
+    expect(result.totalAmount).toBe(7500);
   });
 });
