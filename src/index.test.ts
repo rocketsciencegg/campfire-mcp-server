@@ -1,12 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-// We can't easily test the full server without mocking stdio,
-// but we can verify the module loads and exports are correct.
-
 describe("campfire-mcp-server", () => {
   it("should load without errors", async () => {
-    // Verify the MCP SDK is importable
     expect(McpServer).toBeDefined();
   });
 
@@ -20,6 +16,8 @@ describe("campfire-mcp-server", () => {
 
   it("should register all expected tools", async () => {
     const expectedTools = [
+      "get_financial_snapshot",
+      "get_burn_rate",
       "income_statement",
       "balance_sheet",
       "cash_flow_statement",
@@ -29,9 +27,7 @@ describe("campfire-mcp-server", () => {
       "get_aging",
       "get_contracts",
     ];
-    // Verify we expect 8 tools
-    expect(expectedTools).toHaveLength(8);
-    // Each tool name should be a non-empty string
+    expect(expectedTools).toHaveLength(10);
     for (const tool of expectedTools) {
       expect(tool).toBeTruthy();
       expect(typeof tool).toBe("string");

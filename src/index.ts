@@ -13,6 +13,16 @@ import {
   CoaApi,
   Configuration,
 } from "campfire-typescript-sdk";
+import {
+  getMonthRange,
+  getCurrentYTDRange,
+  getCurrentMonthRange,
+  buildFinancialSnapshot,
+  computeBurnRate,
+  enrichTransactions,
+  analyzeAging,
+  analyzeContracts,
+} from "./helpers.js";
 
 const server = new McpServer({
   name: "campfire-mcp-server",
@@ -41,7 +51,123 @@ function errorResult(toolName: string, err: unknown) {
   };
 }
 
-// --- TOOLS ---
+// --- NEW TOOLS ---
+
+server.registerTool(
+  "get_financial_snapshot",
+  {
+    description:
+      "Get a financial snapshot with key metrics: revenue, expenses, net income, margins, cash position, and current ratio. Returns both current month and YTD data.",
+    inputSchema: {
+      entityId: z.number().optional().describe("Filter by entity ID"),
+    },
+  },
+  async ({ entityId }) => {
+    try {
+      const now = new Date();
+      const monthRange = getCurrentMonthRange(now);
+      const ytdRange = getCurrentYTDRange(now);
+
+      // Fetch current month statements
+      const [monthIncome, monthBalance, monthCashFlow] = await Promise.all([
+        (financialStatementsApi as any).caApiGetIncomeStatementRetrieve(
+          monthRange.dateFrom, monthRange.dateTo, "monthly", entityId
+        ),
+        (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
+          monthRange.dateFrom, monthRange.dateTo, "monthly", entityId
+        ),
+        (financialStatementsApi as any).caApiGetCashFlowRetrieve(
+          monthRange.dateFrom, monthRange.dateTo, "monthly", entityId
+        ),
+      ]);
+
+      // Fetch YTD statements
+      const [ytdIncome, ytdBalance] = await Promise.all([
+        (financialStatementsApi as any).caApiGetIncomeStatementRetrieve(
+          ytdRange.dateFrom, ytdRange.dateTo, "monthly", entityId
+        ),
+        (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
+          ytdRange.dateFrom, ytdRange.dateTo, "monthly", entityId
+        ),
+      ]);
+
+      const monthLabel = now.toLocaleString("default", { month: "long", year: "numeric" });
+      const currentMonth = buildFinancialSnapshot(
+        monthIncome.data, monthBalance.data, monthCashFlow.data,
+        `Current Month (${monthLabel})`,
+      );
+      const ytd = buildFinancialSnapshot(
+        ytdIncome.data, ytdBalance.data, null,
+        `YTD ${now.getFullYear()}`,
+      );
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({ currentMonth, ytd }, null, 2),
+        }],
+      };
+    } catch (err) {
+      return errorResult("get_financial_snapshot", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_burn_rate",
+  {
+    description:
+      "Compute monthly burn rate from the last 3-6 months of income statements. Shows trend (increasing/decreasing/stable), current cash position, and implied runway in months.",
+    inputSchema: {
+      months: z.number().optional().describe("Number of months to analyze (default: 6, min: 3)"),
+      entityId: z.number().optional().describe("Filter by entity ID"),
+    },
+  },
+  async ({ months, entityId }) => {
+    try {
+      const numMonths = Math.max(months ?? 6, 3);
+      const now = new Date();
+
+      // Fetch income statements for each of the last N months
+      const monthlyPromises = [];
+      for (let i = numMonths; i >= 1; i--) {
+        const range = getMonthRange(i, now);
+        monthlyPromises.push(
+          (financialStatementsApi as any)
+            .caApiGetIncomeStatementRetrieve(range.dateFrom, range.dateTo, "monthly", entityId)
+            .then((resp: any) => ({
+              label: new Date(range.dateFrom).toLocaleString("default", { month: "short", year: "numeric" }),
+              data: resp.data,
+            }))
+        );
+      }
+
+      // Fetch latest balance sheet for cash position
+      const currentMonth = getCurrentMonthRange(now);
+      const balancePromise = (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
+        currentMonth.dateFrom, currentMonth.dateTo, "monthly", entityId
+      );
+
+      const [monthlyStatements, balanceResp] = await Promise.all([
+        Promise.all(monthlyPromises),
+        balancePromise,
+      ]);
+
+      const result = computeBurnRate(monthlyStatements, balanceResp.data);
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    } catch (err) {
+      return errorResult("get_burn_rate", err);
+    }
+  }
+);
+
+// --- EXISTING TOOLS (kept as-is for raw detail) ---
 
 server.registerTool(
   "income_statement",
@@ -124,11 +250,13 @@ server.registerTool(
   }
 );
 
+// --- ENRICHED EXISTING TOOLS ---
+
 server.registerTool(
   "get_transactions",
   {
     description:
-      "Retrieve general ledger transactions with filtering by account, vendor, department, and date range.",
+      "Retrieve general ledger transactions with filtering. Returns enriched summary with total debits/credits and breakdown by account type.",
     inputSchema: {
       dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
@@ -142,20 +270,13 @@ server.registerTool(
   async ({ dateFrom, dateTo, accountId, accountType, vendorId, departmentId, limit }) => {
     try {
       const resp = await (coreAccountingApi as any).caApiGetTransactionsList(
-        undefined, // q
-        accountId,
-        accountType,
-        undefined, // accountSubtype
-        undefined, // entityId
-        vendorId,
-        departmentId,
-        undefined, // tagId
-        dateFrom,
-        dateTo,
-        limit ?? 100
+        undefined, accountId, accountType, undefined, undefined,
+        vendorId, departmentId, undefined, dateFrom, dateTo, limit ?? 100
       );
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = enrichTransactions(raw);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       return errorResult("get_transactions", err);
@@ -218,7 +339,7 @@ server.registerTool(
   "get_aging",
   {
     description:
-      "Retrieve AP/AR aging reports grouped by age buckets. Shows outstanding receivables or payables.",
+      "Retrieve AP/AR aging reports with enriched summary: bucket totals, total outstanding, and 90+ day critical items highlighted.",
     inputSchema: {
       agingType: z.enum(["ap", "ar"]).optional().describe("Type: 'ap' for payables, 'ar' for receivables"),
       asOfDate: z.string().optional().describe("Date for aging calculation (YYYY-MM-DD)"),
@@ -231,8 +352,10 @@ server.registerTool(
       const resp = await (coreAccountingApi as any).caApiGetAgingList(
         agingType, asOfDate, entityId, vendorId
       );
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = analyzeAging(raw, agingType);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       return errorResult("get_aging", err);
@@ -244,7 +367,7 @@ server.registerTool(
   "get_contracts",
   {
     description:
-      "Retrieve revenue recognition contracts. Shows contract status, values, and revenue schedules.",
+      "Retrieve revenue recognition contracts with enriched summary: recognized vs remaining revenue, per-contract totals and percentages.",
     inputSchema: {
       q: z.string().optional().describe("Search query"),
       clientId: z.number().optional().describe("Filter by client ID"),
@@ -257,8 +380,10 @@ server.registerTool(
       const resp = await (revenueApi as any).caApiGetContractsList(
         q, clientId, undefined, status, limit ?? 50
       );
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = analyzeContracts(raw);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       return errorResult("get_contracts", err);
