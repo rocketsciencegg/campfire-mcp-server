@@ -1,7 +1,7 @@
 # campfire-mcp-server
 
 [![CI](https://github.com/rocketsciencegg/campfire-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/rocketsciencegg/campfire-mcp-server/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/rocketsciencegg/campfire-mcp-server/badges/coverage.json)
+![Coverage](https://raw.githubusercontent.com/rocketsciencegg/campfire-mcp-server/badges/coverage.svg)
 
 MCP server for Campfire — accounting and financial reporting.
 

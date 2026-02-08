@@ -22,17 +22,36 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           COVERAGE=$(node -e "const c = require('./coverage/coverage-summary.json'); console.log(c.total.lines.pct)")
-          if [ $(echo "$COVERAGE >= 90" | bc) -eq 1 ]; then COLOR="brightgreen"
-          elif [ $(echo "$COVERAGE >= 80" | bc) -eq 1 ]; then COLOR="green"
-          elif [ $(echo "$COVERAGE >= 70" | bc) -eq 1 ]; then COLOR="yellowgreen"
-          elif [ $(echo "$COVERAGE >= 60" | bc) -eq 1 ]; then COLOR="yellow"
-          else COLOR="red"; fi
-          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${COLOR}\"}" > /tmp/coverage.json
+          if [ $(echo "$COVERAGE >= 90" | bc) -eq 1 ]; then COLOR="#4c1"
+          elif [ $(echo "$COVERAGE >= 80" | bc) -eq 1 ]; then COLOR="#97ca00"
+          elif [ $(echo "$COVERAGE >= 70" | bc) -eq 1 ]; then COLOR="#a4a61d"
+          elif [ $(echo "$COVERAGE >= 60" | bc) -eq 1 ]; then COLOR="#dfb317"
+          else COLOR="#e05d44"; fi
+          cat > /tmp/coverage.svg << SVGEOF
+          <svg xmlns="http://www.w3.org/2000/svg" width="106" height="20">
+            <linearGradient id="b" x2="0" y2="100%">
+              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+              <stop offset="1" stop-opacity=".1"/>
+            </linearGradient>
+            <mask id="a"><rect width="106" height="20" rx="3" fill="#fff"/></mask>
+            <g mask="url(#a)">
+              <path fill="#555" d="M0 0h61v20H0z"/>
+              <path fill="${COLOR}" d="M61 0h45v20H61z"/>
+              <path fill="url(#b)" d="M0 0h106v20H0z"/>
+            </g>
+            <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+              <text x="30.5" y="15" fill="#010101" fill-opacity=".3">coverage</text>
+              <text x="30.5" y="14">coverage</text>
+              <text x="83" y="15" fill="#010101" fill-opacity=".3">${COVERAGE}%</text>
+              <text x="83" y="14">${COVERAGE}%</text>
+            </g>
+          </svg>
+          SVGEOF
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout --orphan badges-tmp
           git rm -rf .
-          cp /tmp/coverage.json coverage.json
-          git add coverage.json
+          cp /tmp/coverage.svg coverage.svg
+          git add coverage.svg
           git commit -m "Update coverage badge: ${COVERAGE}%"
           git push origin HEAD:badges --force
