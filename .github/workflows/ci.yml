@@ -16,4 +16,23 @@ jobs:
           node-version: 20
       - run: npm install
       - run: npm run build
-      - run: npm test
+      - run: npm run test:coverage
+
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          COVERAGE=$(node -e "const c = require('./coverage/coverage-summary.json'); console.log(c.total.lines.pct)")
+          if [ $(echo "$COVERAGE >= 90" | bc) -eq 1 ]; then COLOR="brightgreen"
+          elif [ $(echo "$COVERAGE >= 80" | bc) -eq 1 ]; then COLOR="green"
+          elif [ $(echo "$COVERAGE >= 70" | bc) -eq 1 ]; then COLOR="yellowgreen"
+          elif [ $(echo "$COVERAGE >= 60" | bc) -eq 1 ]; then COLOR="yellow"
+          else COLOR="red"; fi
+          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${COLOR}\"}" > /tmp/coverage.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan badges-tmp
+          git rm -rf .
+          cp /tmp/coverage.json coverage.json
+          git add coverage.json
+          git commit -m "Update coverage badge: ${COVERAGE}%"
+          git push origin HEAD:badges --force
