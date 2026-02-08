@@ -22,6 +22,8 @@ MCP server for Campfire — accounting and financial reporting.
 | `get_customers` | Contract customers with financial summaries: revenue, MRR, billed/unbilled/outstanding, contract counts |
 | `get_invoices` | Invoices filtered by status (unpaid, paid, past_due, etc.), date range, client; summary with totals by status |
 | `trial_balance` | Trial balance by account type with debit/credit totals and per-account net amounts |
+| `get_budgets` | List budgets with entity/department names resolved, cadence breakdown summary |
+| `get_budget_details` | Single budget with all account allocations grouped by account type and department, with totals |
 
 ## Installation
 

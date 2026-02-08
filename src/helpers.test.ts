@@ -11,6 +11,8 @@ import {
   shapeCustomers,
   shapeInvoices,
   shapeTrialBalance,
+  shapeBudgets,
+  shapeBudgetDetail,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -847,5 +849,257 @@ describe("shapeTrialBalance", () => {
     });
     expect(result.accounts[0].accountType).toBe("Unknown");
     expect(result.byAccountType["Unknown"].count).toBe(1);
+  });
+});
+
+// --- Budget shaping ---
+
+describe("shapeBudgets", () => {
+  const budgets = [
+    {
+      id: 1,
+      name: "2026 Operating Budget",
+      description: "Annual operating budget",
+      entity: 10,
+      entity_name: "Main Entity",
+      department: 5,
+      department_name: "Engineering",
+      cadence: "monthly",
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+      periods: 12,
+      breakdown_type: "standard",
+      currency: "USD",
+      tags: [{ name: "Q1" }, { name: "approved" }],
+    },
+    {
+      id: 2,
+      name: "Marketing FY26",
+      entity: 10,
+      entity_name: "Main Entity",
+      department: 8,
+      department_name: "Marketing",
+      cadence: "quarterly",
+      start_date: "2026-01-01",
+      end_date: "2026-12-31",
+      periods: 4,
+      currency: "USD",
+      tags: [],
+    },
+    {
+      id: 3,
+      name: "R&D Budget",
+      entity_name: "Main Entity",
+      cadence: "monthly",
+      start_date: "2026-01-01",
+    },
+  ];
+
+  it("computes summary with cadence breakdown", () => {
+    const result = shapeBudgets(budgets);
+    expect(result.totalBudgets).toBe(3);
+    expect(result.byCadence["monthly"]).toBe(2);
+    expect(result.byCadence["quarterly"]).toBe(1);
+  });
+
+  it("resolves entity and department names", () => {
+    const result = shapeBudgets(budgets);
+    expect(result.budgets[0].entityName).toBe("Main Entity");
+    expect(result.budgets[0].departmentName).toBe("Engineering");
+    expect(result.budgets[0].entityId).toBe(10);
+    expect(result.budgets[0].departmentId).toBe(5);
+  });
+
+  it("shapes individual budget fields", () => {
+    const result = shapeBudgets(budgets);
+    expect(result.budgets[0].name).toBe("2026 Operating Budget");
+    expect(result.budgets[0].description).toBe("Annual operating budget");
+    expect(result.budgets[0].cadence).toBe("monthly");
+    expect(result.budgets[0].startDate).toBe("2026-01-01");
+    expect(result.budgets[0].endDate).toBe("2026-12-31");
+    expect(result.budgets[0].periods).toBe(12);
+    expect(result.budgets[0].breakdownType).toBe("standard");
+    expect(result.budgets[0].currency).toBe("USD");
+    expect(result.budgets[0].tags).toEqual(["Q1", "approved"]);
+  });
+
+  it("handles missing optional fields", () => {
+    const result = shapeBudgets(budgets);
+    const rd = result.budgets[2];
+    expect(rd.description).toBeNull();
+    expect(rd.departmentId).toBeNull();
+    expect(rd.departmentName).toBeNull();
+    expect(rd.endDate).toBeNull();
+    expect(rd.periods).toBeNull();
+    expect(rd.breakdownType).toBeNull();
+    expect(rd.cadence).toBe("monthly");
+  });
+
+  it("handles empty budget list", () => {
+    const result = shapeBudgets([]);
+    expect(result.totalBudgets).toBe(0);
+    expect(result.byCadence).toEqual({});
+    expect(result.budgets).toHaveLength(0);
+  });
+
+  it("extracts tag names from tag objects", () => {
+    const result = shapeBudgets([
+      { id: 99, name: "Tagged", start_date: "2026-01-01", tags: [{ name: "important" }] },
+    ]);
+    expect(result.budgets[0].tags).toEqual(["important"]);
+  });
+
+  it("handles plain string tags", () => {
+    const result = shapeBudgets([
+      { id: 99, name: "Tagged", start_date: "2026-01-01", tags: ["plain-tag"] },
+    ]);
+    expect(result.budgets[0].tags).toEqual(["plain-tag"]);
+  });
+
+  it("defaults cadence to unspecified when missing", () => {
+    const result = shapeBudgets([{ id: 99, name: "No Cadence", start_date: "2026-01-01" }]);
+    expect(result.budgets[0].cadence).toBe("unspecified");
+    expect(result.byCadence["unspecified"]).toBe(1);
+  });
+});
+
+describe("shapeBudgetDetail", () => {
+  const budget = {
+    id: 1,
+    name: "2026 Operating Budget",
+    description: "Annual ops",
+    entity: 10,
+    entity_name: "Main Entity",
+    department: null,
+    department_name: "",
+    cadence: "monthly",
+    start_date: "2026-01-01",
+    end_date: "2026-12-31",
+    periods: 12,
+    breakdown_type: "standard",
+    currency: "USD",
+  };
+
+  const allocations = [
+    {
+      id: 101,
+      account: 1000,
+      account_name: "Salaries",
+      account_lineage: "Expenses > Payroll > Salaries",
+      department: 5,
+      department_name: "Engineering",
+      period: 1,
+      amount: 50000,
+    },
+    {
+      id: 102,
+      account: 1001,
+      account_name: "Benefits",
+      account_lineage: "Expenses > Payroll > Benefits",
+      department: 5,
+      department_name: "Engineering",
+      period: 1,
+      amount: 15000,
+    },
+    {
+      id: 103,
+      account: 2000,
+      account_name: "Cloud Hosting",
+      account_lineage: "Expenses > Infrastructure > Cloud Hosting",
+      department: 5,
+      department_name: "Engineering",
+      period: 1,
+      amount: 8000,
+    },
+    {
+      id: 104,
+      account: 3000,
+      account_name: "Ad Spend",
+      account_lineage: "Expenses > Marketing > Ad Spend",
+      department: 8,
+      department_name: "Marketing",
+      period: 1,
+      amount: 20000,
+    },
+  ];
+
+  it("computes total budgeted amount", () => {
+    const result = shapeBudgetDetail(budget, allocations);
+    expect(result.totalBudgeted).toBe(93000);
+    expect(result.allocationCount).toBe(4);
+  });
+
+  it("includes budget metadata", () => {
+    const result = shapeBudgetDetail(budget, allocations);
+    expect(result.id).toBe(1);
+    expect(result.name).toBe("2026 Operating Budget");
+    expect(result.entityName).toBe("Main Entity");
+    expect(result.cadence).toBe("monthly");
+    expect(result.startDate).toBe("2026-01-01");
+    expect(result.endDate).toBe("2026-12-31");
+    expect(result.currency).toBe("USD");
+  });
+
+  it("groups allocations by top-level account type from lineage", () => {
+    const result = shapeBudgetDetail(budget, allocations);
+    expect(result.byAccountType["Expenses"].count).toBe(4);
+    expect(result.byAccountType["Expenses"].total).toBe(93000);
+  });
+
+  it("groups allocations by department", () => {
+    const result = shapeBudgetDetail(budget, allocations);
+    expect(result.byDepartment["Engineering"].count).toBe(3);
+    expect(result.byDepartment["Engineering"].total).toBe(73000);
+    expect(result.byDepartment["Marketing"].count).toBe(1);
+    expect(result.byDepartment["Marketing"].total).toBe(20000);
+  });
+
+  it("shapes individual allocations with resolved names and IDs", () => {
+    const result = shapeBudgetDetail(budget, allocations);
+    const first = result.allocations[0];
+    expect(first.id).toBe(101);
+    expect(first.accountId).toBe(1000);
+    expect(first.accountName).toBe("Salaries");
+    expect(first.accountLineage).toBe("Expenses > Payroll > Salaries");
+    expect(first.departmentId).toBe(5);
+    expect(first.departmentName).toBe("Engineering");
+    expect(first.period).toBe(1);
+    expect(first.amount).toBe(50000);
+  });
+
+  it("handles empty allocations", () => {
+    const result = shapeBudgetDetail(budget, []);
+    expect(result.totalBudgeted).toBe(0);
+    expect(result.allocationCount).toBe(0);
+    expect(result.byAccountType).toEqual({});
+    expect(result.byDepartment).toEqual({});
+    expect(result.allocations).toHaveLength(0);
+  });
+
+  it("handles allocations without lineage", () => {
+    const result = shapeBudgetDetail(budget, [
+      { id: 200, account: 5000, account_name: "Misc", account_lineage: "", amount: 1000 },
+    ]);
+    expect(result.allocations[0].accountLineage).toBe("");
+    expect(result.byAccountType["Misc"]).toBeDefined();
+    expect(result.byAccountType["Misc"].total).toBe(1000);
+  });
+
+  it("handles allocations without department", () => {
+    const result = shapeBudgetDetail(budget, [
+      { id: 201, account: 5000, account_name: "Misc", account_lineage: "Expenses > Misc", amount: 500 },
+    ]);
+    expect(result.allocations[0].departmentId).toBeNull();
+    expect(result.allocations[0].departmentName).toBeNull();
+    expect(result.byDepartment["Unassigned"].count).toBe(1);
+    expect(result.byDepartment["Unassigned"].total).toBe(500);
+  });
+
+  it("handles missing amount (defaults to 0)", () => {
+    const result = shapeBudgetDetail(budget, [
+      { id: 202, account: 5000, account_name: "Empty", account_lineage: "Expenses > Empty" },
+    ]);
+    expect(result.allocations[0].amount).toBe(0);
+    expect(result.totalBudgeted).toBe(0);
   });
 });

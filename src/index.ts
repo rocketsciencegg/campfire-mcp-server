@@ -30,6 +30,8 @@ import {
   shapeCustomers,
   shapeInvoices,
   shapeTrialBalance,
+  shapeBudgets,
+  shapeBudgetDetail,
 } from "./helpers.js";
 
 // Campfire uses apiKey auth with "Token <key>" format
@@ -497,6 +499,71 @@ server.registerTool(
       };
     } catch (err) {
       return errorResult("get_invoices", err);
+    }
+  }
+);
+
+// --- BUDGET TOOLS ---
+
+server.registerTool(
+  "get_budgets",
+  {
+    description:
+      "List budgets with optional filtering by entity or search query. Returns summary with count, cadence breakdown, and each budget's entity/department names resolved.",
+    inputSchema: {
+      entityId: z.number().optional().describe("Filter by entity ID"),
+      q: z.string().optional().describe("Search by budget name"),
+      limit: z.number().optional().describe("Max results (default: 50)"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ entityId, q, limit, offset }) => {
+    try {
+      const resp = await (coaApi as any).coaApiBudgetsList(
+        entityId,         // entity
+        undefined,        // entityName
+        undefined,        // includeDeleted
+        undefined,        // lastModifiedAtGte
+        undefined,        // lastModifiedAtLte
+        limit ?? 50,      // limit
+        offset ?? 0,      // offset
+        q,                // q
+        undefined,        // sort
+      );
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeBudgets(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_budgets", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_budget_details",
+  {
+    description:
+      "Get a single budget with all its account allocations. Returns budget metadata (entity, department, cadence, dates) plus allocations grouped by top-level account type and department, with totals. Use get_budgets first to find the budget ID.",
+    inputSchema: {
+      budgetId: z.number().describe("The budget ID (from get_budgets)"),
+    },
+  },
+  async ({ budgetId }) => {
+    try {
+      const [budgetResp, allocResp] = await Promise.all([
+        (coaApi as any).coaApiBudgetsRetrieve(budgetId),
+        (coaApi as any).coaApiBudgetsAccountsList(budgetId),
+      ]);
+      const budget = budgetResp.data;
+      const allocations = Array.isArray(allocResp.data) ? allocResp.data : allocResp.data?.results || [];
+      const result = shapeBudgetDetail(budget, allocations);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_budget_details", err);
     }
   }
 );
