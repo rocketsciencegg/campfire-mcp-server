@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { Request, Response } from "express";
 import { z } from "zod";
 import {
   FinancialStatementsApi,
@@ -27,11 +32,6 @@ import {
   shapeTrialBalance,
 } from "./helpers.js";
 
-const server = new McpServer({
-  name: "campfire-mcp-server",
-  version: "1.0.0",
-});
-
 // Campfire uses apiKey auth with "Token <key>" format
 const config = new Configuration({
   apiKey: `Token ${process.env.CAMPFIRE_API_KEY}`,
@@ -55,6 +55,12 @@ function errorResult(toolName: string, err: unknown) {
 }
 
 // --- NEW TOOLS ---
+
+function createServer() {
+const server = new McpServer({
+  name: "campfire-mcp-server",
+  version: "2.0.0",
+});
 
 server.registerTool(
   "get_financial_snapshot",
@@ -495,12 +501,60 @@ server.registerTool(
   }
 );
 
+return server;
+}
+
 // --- START ---
 
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Campfire MCP Server running on stdio");
+  const port = process.env.PORT;
+
+  if (port) {
+    const app = createMcpExpressApp({ host: "0.0.0.0" });
+    const transports: Record<string, StreamableHTTPServerTransport> = {};
+
+    app.all("/mcp", async (req: Request, res: Response) => {
+      const sessionId = req.headers["mcp-session-id"] as string | undefined;
+      let transport: StreamableHTTPServerTransport;
+
+      if (sessionId && transports[sessionId]) {
+        transport = transports[sessionId];
+      } else if (!sessionId && req.method === "POST" && isInitializeRequest(req.body)) {
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (sid) => { transports[sid] = transport; },
+        });
+        transport.onclose = () => {
+          if (transport.sessionId) delete transports[transport.sessionId];
+        };
+        await createServer().connect(transport);
+      } else {
+        res.status(400).json({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Bad Request: No valid session" },
+          id: null,
+        });
+        return;
+      }
+
+      await transport.handleRequest(req, res, req.body);
+    });
+
+    app.listen(parseInt(port), "0.0.0.0", () => {
+      console.error(`Campfire MCP Server listening on http://0.0.0.0:${port}/mcp`);
+    });
+
+    process.on("SIGINT", async () => {
+      for (const sid in transports) {
+        try { await transports[sid].close(); } catch {}
+      }
+      process.exit(0);
+    });
+  } else {
+    const transport = new StdioServerTransport();
+    await createServer().connect(transport);
+    console.error("Campfire MCP Server running on stdio");
+  }
 }
 
 main().catch((err) => {
