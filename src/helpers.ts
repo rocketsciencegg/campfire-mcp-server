@@ -538,6 +538,128 @@ function extractTotal(data: any, keywords: string[]): number {
   return 0;
 }
 
+// --- Budget shaping ---
+
+export interface BudgetListSummary {
+  totalBudgets: number;
+  byCadence: Record<string, number>;
+  budgets: any[];
+}
+
+export function shapeBudgets(budgets: any[]): BudgetListSummary {
+  const byCadence: Record<string, number> = {};
+
+  const shaped = budgets.map((b: any) => {
+    const cadence = b.cadence || "unspecified";
+    byCadence[cadence] = (byCadence[cadence] || 0) + 1;
+
+    return {
+      id: b.id,
+      name: b.name,
+      description: b.description || null,
+      entityId: b.entity ?? null,
+      entityName: b.entity_name || null,
+      departmentId: b.department ?? null,
+      departmentName: b.department_name || null,
+      cadence,
+      startDate: b.start_date,
+      endDate: b.end_date || null,
+      periods: b.periods ?? null,
+      breakdownType: b.breakdown_type || null,
+      currency: b.currency || null,
+      tags: Array.isArray(b.tags) ? b.tags.map((t: any) => t.name || t) : [],
+    };
+  });
+
+  return {
+    totalBudgets: budgets.length,
+    byCadence,
+    budgets: shaped,
+  };
+}
+
+export interface BudgetDetailSummary {
+  id: number;
+  name: string;
+  description: string | null;
+  entityId: number | null;
+  entityName: string | null;
+  departmentId: number | null;
+  departmentName: string | null;
+  cadence: string;
+  startDate: string;
+  endDate: string | null;
+  periods: number | null;
+  breakdownType: string | null;
+  currency: string | null;
+  totalBudgeted: number;
+  allocationCount: number;
+  byAccountType: Record<string, { count: number; total: number }>;
+  byDepartment: Record<string, { count: number; total: number }>;
+  allocations: any[];
+}
+
+export function shapeBudgetDetail(budget: any, allocations: any[]): BudgetDetailSummary {
+  let totalBudgeted = 0;
+  const byAccountType: Record<string, { count: number; total: number }> = {};
+  const byDepartment: Record<string, { count: number; total: number }> = {};
+
+  const shaped = allocations.map((a: any) => {
+    const amount = Number(a.amount ?? 0);
+    totalBudgeted += amount;
+
+    // Group by top-level account type from lineage (e.g. "Assets > Current Assets > Cash")
+    const lineage = a.account_lineage || "";
+    const accountType = lineage.split(">")[0]?.trim() || a.account_name || "Unknown";
+    if (!byAccountType[accountType]) byAccountType[accountType] = { count: 0, total: 0 };
+    byAccountType[accountType].count++;
+    byAccountType[accountType].total += amount;
+
+    const dept = a.department_name || "Unassigned";
+    if (!byDepartment[dept]) byDepartment[dept] = { count: 0, total: 0 };
+    byDepartment[dept].count++;
+    byDepartment[dept].total += amount;
+
+    return {
+      id: a.id,
+      accountId: a.account,
+      accountName: a.account_name,
+      accountLineage: lineage,
+      departmentId: a.department ?? null,
+      departmentName: a.department_name || null,
+      period: a.period ?? null,
+      amount,
+    };
+  });
+
+  // Round group totals
+  for (const g of Object.values(byAccountType)) g.total = round(g.total);
+  for (const g of Object.values(byDepartment)) g.total = round(g.total);
+
+  return {
+    id: budget.id,
+    name: budget.name,
+    description: budget.description || null,
+    entityId: budget.entity ?? null,
+    entityName: budget.entity_name || null,
+    departmentId: budget.department ?? null,
+    departmentName: budget.department_name || null,
+    cadence: budget.cadence || "unspecified",
+    startDate: budget.start_date,
+    endDate: budget.end_date || null,
+    periods: budget.periods ?? null,
+    breakdownType: budget.breakdown_type || null,
+    currency: budget.currency || null,
+    totalBudgeted: round(totalBudgeted),
+    allocationCount: allocations.length,
+    byAccountType,
+    byDepartment,
+    allocations: shaped,
+  };
+}
+
+// --- Utility ---
+
 function round(n: number, decimals = 2): number {
   const factor = 10 ** decimals;
   return Math.round(n * factor) / factor;
