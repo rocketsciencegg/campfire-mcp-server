@@ -22,6 +22,8 @@ import {
   enrichTransactions,
   analyzeAging,
   analyzeContracts,
+  shapeCustomers,
+  shapeTrialBalance,
 } from "./helpers.js";
 
 const server = new McpServer({
@@ -387,6 +389,62 @@ server.registerTool(
       };
     } catch (err) {
       return errorResult("get_contracts", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_customers",
+  {
+    description:
+      "Retrieve contract customers with financial summaries: total revenue, MRR, billed/unbilled/outstanding amounts, and contract counts per customer.",
+    inputSchema: {
+      limit: z.number().optional().describe("Max results (default: 50)"),
+      offset: z.number().optional().describe("Pagination offset"),
+      includeDeleted: z.boolean().optional().describe("Include deleted customers"),
+    },
+  },
+  async ({ limit, offset, includeDeleted }) => {
+    try {
+      const resp = await (revenueApi as any).rrApiV1CustomersList({
+        includeDeleted,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+      });
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeCustomers(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_customers", err);
+    }
+  }
+);
+
+server.registerTool(
+  "trial_balance",
+  {
+    description:
+      "Generate a trial balance report showing debits and credits per account, grouped by account type. Verifies that total debits equal total credits.",
+    inputSchema: {
+      startDate: z.string().optional().describe("Start date (YYYY-MM-DD)"),
+      endDate: z.string().optional().describe("End date (YYYY-MM-DD)"),
+      entityId: z.number().optional().describe("Filter by entity ID"),
+      departmentId: z.number().optional().describe("Filter by department ID"),
+    },
+  },
+  async ({ startDate, endDate, entityId, departmentId }) => {
+    try {
+      const resp = await (financialStatementsApi as any).caApiGetTrialBalanceRetrieve(
+        departmentId, endDate, entityId, undefined, undefined, startDate
+      );
+      const result = shapeTrialBalance(resp.data);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("trial_balance", err);
     }
   }
 );

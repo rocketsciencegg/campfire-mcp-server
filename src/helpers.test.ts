@@ -8,6 +8,8 @@ import {
   enrichTransactions,
   analyzeAging,
   analyzeContracts,
+  shapeCustomers,
+  shapeTrialBalance,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -488,5 +490,212 @@ describe("analyzeContracts", () => {
     expect(result.totalRevenue).toBe(60000);
     expect(result.totalRecognized).toBe(30000);
     expect(result.totalRemaining).toBe(30000);
+  });
+});
+
+// --- Customer shaping ---
+
+describe("shapeCustomers", () => {
+  const customers = [
+    {
+      id: 1,
+      name: "Acme Corp",
+      companyName: "Acme Corporation",
+      email: "billing@acme.com",
+      phoneNumber: "555-1234",
+      currency: "USD",
+      activeContracts: 2,
+      completedContracts: 1,
+      totalContracts: 3,
+      totalRevenue: 150000,
+      totalMrr: 12500,
+      totalBilled: 100000,
+      totalUnbilled: 50000,
+      totalPaid: 90000,
+      totalOutstanding: 10000,
+      totalDeferredRevenue: 25000,
+      paymentTermNameDisplay: "Net 30",
+      status: "active",
+    },
+    {
+      id: 2,
+      name: "Beta Inc",
+      email: "ar@beta.com",
+      currency: "USD",
+      activeContracts: 1,
+      totalContracts: 1,
+      totalRevenue: 50000,
+      totalMrr: 4167,
+      totalBilled: 30000,
+      totalUnbilled: 20000,
+      totalPaid: 30000,
+      totalOutstanding: 0,
+      totalDeferredRevenue: 5000,
+      status: "active",
+    },
+  ];
+
+  it("computes aggregate totals", () => {
+    const result = shapeCustomers(customers);
+    expect(result.totalCustomers).toBe(2);
+    expect(result.totalRevenue).toBe(200000);
+    expect(result.totalMrr).toBe(16667);
+    expect(result.totalOutstanding).toBe(10000);
+  });
+
+  it("shapes individual customer fields", () => {
+    const result = shapeCustomers(customers);
+    expect(result.customers[0].name).toBe("Acme Corp");
+    expect(result.customers[0].companyName).toBe("Acme Corporation");
+    expect(result.customers[0].email).toBe("billing@acme.com");
+    expect(result.customers[0].phone).toBe("555-1234");
+    expect(result.customers[0].activeContracts).toBe(2);
+    expect(result.customers[0].totalRevenue).toBe(150000);
+    expect(result.customers[0].totalMrr).toBe(12500);
+    expect(result.customers[0].totalPaid).toBe(90000);
+    expect(result.customers[0].paymentTerms).toBe("Net 30");
+  });
+
+  it("handles snake_case field names", () => {
+    const result = shapeCustomers([
+      {
+        id: 10,
+        name: "Snake Co",
+        company_name: "Snake Corp",
+        phone_number: "555-9999",
+        total_revenue: 80000,
+        total_mrr: 6667,
+        total_outstanding: 5000,
+        active_contracts: 3,
+        completed_contracts: 2,
+        total_contracts: 5,
+        total_billed: 60000,
+        total_unbilled: 20000,
+        total_paid: 55000,
+        total_deferred_revenue: 10000,
+        payment_term_name_display: "Net 45",
+      },
+    ]);
+    expect(result.customers[0].companyName).toBe("Snake Corp");
+    expect(result.customers[0].phone).toBe("555-9999");
+    expect(result.customers[0].totalRevenue).toBe(80000);
+    expect(result.customers[0].activeContracts).toBe(3);
+    expect(result.customers[0].paymentTerms).toBe("Net 45");
+    expect(result.totalRevenue).toBe(80000);
+  });
+
+  it("handles empty customer list", () => {
+    const result = shapeCustomers([]);
+    expect(result.totalCustomers).toBe(0);
+    expect(result.totalRevenue).toBe(0);
+    expect(result.totalMrr).toBe(0);
+    expect(result.totalOutstanding).toBe(0);
+    expect(result.customers).toHaveLength(0);
+  });
+
+  it("handles missing numeric fields gracefully", () => {
+    const result = shapeCustomers([{ id: 99, name: "Sparse" }]);
+    expect(result.customers[0].totalRevenue).toBe(0);
+    expect(result.customers[0].totalMrr).toBe(0);
+    expect(result.customers[0].activeContracts).toBe(0);
+    expect(result.totalRevenue).toBe(0);
+  });
+});
+
+// --- Trial balance shaping ---
+
+describe("shapeTrialBalance", () => {
+  const trialBalanceData = {
+    startDate: "2026-01-01",
+    endDate: "2026-01-31",
+    trialBalance: {
+      accounts: [
+        { id: "1", name: "Cash", number: "1000", accountType: "Asset", balances: { debits: 50000, credits: 10000 } },
+        { id: "2", name: "Accounts Receivable", number: "1100", accountType: "Asset", balances: { debits: 30000, credits: 5000 } },
+        { id: "3", name: "Revenue", number: "4000", accountType: "Revenue", balances: { debits: 0, credits: 65000 } },
+      ],
+    },
+  };
+
+  it("computes total debits and credits", () => {
+    const result = shapeTrialBalance(trialBalanceData);
+    expect(result.totalDebits).toBe(80000);
+    expect(result.totalCredits).toBe(80000);
+  });
+
+  it("includes date range", () => {
+    const result = shapeTrialBalance(trialBalanceData);
+    expect(result.startDate).toBe("2026-01-01");
+    expect(result.endDate).toBe("2026-01-31");
+  });
+
+  it("counts accounts", () => {
+    const result = shapeTrialBalance(trialBalanceData);
+    expect(result.accountCount).toBe(3);
+  });
+
+  it("groups by account type", () => {
+    const result = shapeTrialBalance(trialBalanceData);
+    expect(result.byAccountType["Asset"].count).toBe(2);
+    expect(result.byAccountType["Asset"].debits).toBe(80000);
+    expect(result.byAccountType["Asset"].credits).toBe(15000);
+    expect(result.byAccountType["Revenue"].count).toBe(1);
+    expect(result.byAccountType["Revenue"].credits).toBe(65000);
+  });
+
+  it("shapes individual accounts with net", () => {
+    const result = shapeTrialBalance(trialBalanceData);
+    expect(result.accounts[0].name).toBe("Cash");
+    expect(result.accounts[0].number).toBe("1000");
+    expect(result.accounts[0].debits).toBe(50000);
+    expect(result.accounts[0].credits).toBe(10000);
+    expect(result.accounts[0].net).toBe(40000);
+  });
+
+  it("handles snake_case field names", () => {
+    const result = shapeTrialBalance({
+      start_date: "2026-02-01",
+      end_date: "2026-02-28",
+      trial_balance: {
+        accounts: [
+          { id: "1", name: "Cash", number: "1000", account_type: "Asset", debits: 10000, credits: 2000 },
+        ],
+      },
+    });
+    expect(result.startDate).toBe("2026-02-01");
+    expect(result.endDate).toBe("2026-02-28");
+    expect(result.accounts[0].accountType).toBe("Asset");
+    expect(result.accounts[0].debits).toBe(10000);
+    expect(result.accounts[0].credits).toBe(2000);
+  });
+
+  it("handles empty/null data", () => {
+    const result = shapeTrialBalance(null);
+    expect(result.totalDebits).toBe(0);
+    expect(result.totalCredits).toBe(0);
+    expect(result.accountCount).toBe(0);
+    expect(result.accounts).toHaveLength(0);
+  });
+
+  it("handles data without wrapper (accounts directly)", () => {
+    const result = shapeTrialBalance({
+      accounts: [
+        { id: "1", name: "Cash", number: "1000", accountType: "Asset", balances: { debits: 5000, credits: 1000 } },
+      ],
+    });
+    expect(result.accountCount).toBe(1);
+    expect(result.totalDebits).toBe(5000);
+  });
+
+  it("handles missing accountType", () => {
+    const result = shapeTrialBalance({
+      trialBalance: {
+        accounts: [
+          { id: "1", name: "Misc", number: "9999", balances: { debits: 100, credits: 100 } },
+        ],
+      },
+    });
+    expect(result.accounts[0].accountType).toBe("Unknown");
+    expect(result.byAccountType["Unknown"].count).toBe(1);
   });
 });
