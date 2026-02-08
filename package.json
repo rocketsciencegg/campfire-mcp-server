@@ -1,7 +1,6 @@
 {
   "name": "campfire-mcp-server",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "bin": {
     "campfire-mcp-server": "./build/index.js"
@@ -9,6 +8,7 @@
   "main": "build/index.js",
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "start": "node build/index.js"
   },
   "dependencies": {
