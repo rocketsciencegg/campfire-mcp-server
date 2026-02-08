@@ -22,8 +22,10 @@ MCP server for Campfire — accounting and financial reporting.
 
 ## Installation
 
+No install needed — runs directly via `npx`:
+
 ```bash
-npm install -g github:rocketsciencegg/campfire-mcp-server
+npx -y github:rocketsciencegg/campfire-mcp-server
 ```
 
 ## Configuration
@@ -36,7 +38,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "campfire": {
-      "command": "campfire-mcp-server",
+      "command": "npx",
+      "args": ["-y", "github:rocketsciencegg/campfire-mcp-server"],
       "env": {
         "CAMPFIRE_API_KEY": "your-api-key"
       }
@@ -53,7 +56,8 @@ Add to your project's `.mcp.json`:
 {
   "mcpServers": {
     "campfire": {
-      "command": "campfire-mcp-server",
+      "command": "npx",
+      "args": ["-y", "github:rocketsciencegg/campfire-mcp-server"],
       "env": {
         "CAMPFIRE_API_KEY": "${CAMPFIRE_API_KEY}"
       }
