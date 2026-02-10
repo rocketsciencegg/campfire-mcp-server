@@ -63,7 +63,7 @@ function errorResult(toolName: string, err: unknown) {
 function createServer() {
 const server = new McpServer({
   name: "campfire-mcp-server",
-  version: "2.1.0",
+  version: "2.1.1",
 });
 
 server.registerTool(
