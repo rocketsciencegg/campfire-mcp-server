@@ -389,23 +389,22 @@ export function shapeInvoices(invoices: any[]): InvoiceSummary {
     byStatus[status].totalAmount += amount;
     byStatus[status].totalDue += due;
 
-    return {
+    // Compact shape: drop low-value fields (contractName, entityName, paidDate,
+    // currency, paymentTerms) to reduce token usage for LLM consumers.
+    const shaped: Record<string, any> = {
       id: inv.id,
       invoiceNumber: inv.invoiceNumber ?? inv.invoice_number,
       clientName: inv.clientName ?? inv.client_name,
-      contractName: inv.contractName ?? inv.contract_name,
-      entityName: inv.entityName ?? inv.entity_name,
       status,
       invoiceDate: inv.invoiceDate ?? inv.invoice_date,
       dueDate: inv.dueDate ?? inv.due_date,
-      paidDate: inv.paidDate ?? inv.paid_date,
       totalAmount: amount,
-      amountPaid: paid,
       amountDue: due,
-      pastDueDays: Number(inv.pastDueDays ?? inv.past_due_days ?? 0),
-      currency: inv.currency ?? inv.entityCurrency ?? inv.entity_currency,
-      paymentTerms: inv.paymentTermName ?? inv.payment_term_name,
     };
+    if (paid > 0) shaped.amountPaid = paid;
+    const pastDue = Number(inv.pastDueDays ?? inv.past_due_days ?? 0);
+    if (pastDue > 0) shaped.pastDueDays = pastDue;
+    return shaped;
   });
 
   // Round status bucket totals
@@ -795,6 +794,31 @@ export function shapeBills(bills: any[]): BillSummary {
     byStatus,
     byVendor,
     bills: shaped,
+  };
+}
+
+// --- Department shaping ---
+
+export interface DepartmentSummary {
+  totalDepartments: number;
+  departments: any[];
+}
+
+export function shapeDepartments(departments: any[]): DepartmentSummary {
+  const shaped = departments.map((d: any) => ({
+    id: d.id,
+    name: d.name,
+    description: d.description || null,
+    isActive: d.is_active ?? d.isActive ?? true,
+    parentId: d.parent ?? d.parentId ?? null,
+    parentName: d.parent_name ?? d.parentName ?? null,
+    entityId: d.entity ?? d.entityId ?? null,
+    entityName: d.entity_name ?? d.entityName ?? null,
+  }));
+
+  return {
+    totalDepartments: departments.length,
+    departments: shaped,
   };
 }
 

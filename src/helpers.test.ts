@@ -15,6 +15,7 @@ import {
   shapeBudgetDetail,
   shapeUncategorizedTransactions,
   shapeBills,
+  shapeDepartments,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -680,19 +681,29 @@ describe("shapeInvoices", () => {
     expect(result.byStatus["paid"].totalDue).toBe(0);
   });
 
-  it("shapes individual invoice fields", () => {
+  it("shapes individual invoice fields (compact)", () => {
     const result = shapeInvoices(invoices);
     expect(result.invoices[0].invoiceNumber).toBe("INV-001");
     expect(result.invoices[0].clientName).toBe("Acme Corp");
-    expect(result.invoices[0].contractName).toBe("Project Alpha");
     expect(result.invoices[0].status).toBe("unpaid");
     expect(result.invoices[0].totalAmount).toBe(10000);
     expect(result.invoices[0].amountDue).toBe(10000);
-    expect(result.invoices[0].paymentTerms).toBe("Net 30");
+    // Removed fields for compactness: contractName, entityName, currency, paymentTerms
+    expect(result.invoices[0].contractName).toBeUndefined();
+    expect(result.invoices[0].entityName).toBeUndefined();
+    expect(result.invoices[0].currency).toBeUndefined();
+    expect(result.invoices[0].paymentTerms).toBeUndefined();
   });
 
-  it("includes past due days", () => {
+  it("omits amountPaid when zero", () => {
     const result = shapeInvoices(invoices);
+    expect(result.invoices[0].amountPaid).toBeUndefined();
+    expect(result.invoices[1].amountPaid).toBe(5000);
+  });
+
+  it("includes pastDueDays only when positive", () => {
+    const result = shapeInvoices(invoices);
+    expect(result.invoices[0].pastDueDays).toBeUndefined(); // 0 days
     expect(result.invoices[2].pastDueDays).toBe(69);
   });
 
@@ -702,30 +713,21 @@ describe("shapeInvoices", () => {
         id: 200,
         invoice_number: "INV-200",
         client_name: "Snake Client",
-        contract_name: "Snake Contract",
-        entity_name: "Snake Entity",
         status: "partially_paid",
         invoice_date: "2026-01-01",
         due_date: "2026-01-31",
-        paid_date: "2026-01-20",
         total_amount: 6000,
         amount_paid: 2000,
         amount_due: 4000,
         past_due_days: 8,
-        entity_currency: "EUR",
-        payment_term_name: "Net 15",
       },
     ]);
     expect(result.invoices[0].invoiceNumber).toBe("INV-200");
     expect(result.invoices[0].clientName).toBe("Snake Client");
-    expect(result.invoices[0].contractName).toBe("Snake Contract");
-    expect(result.invoices[0].entityName).toBe("Snake Entity");
     expect(result.invoices[0].totalAmount).toBe(6000);
     expect(result.invoices[0].amountPaid).toBe(2000);
     expect(result.invoices[0].amountDue).toBe(4000);
     expect(result.invoices[0].pastDueDays).toBe(8);
-    expect(result.invoices[0].currency).toBe("EUR");
-    expect(result.invoices[0].paymentTerms).toBe("Net 15");
     expect(result.totalPaid).toBe(2000);
     expect(result.totalDue).toBe(4000);
   });
@@ -742,9 +744,10 @@ describe("shapeInvoices", () => {
   it("handles missing numeric fields gracefully", () => {
     const result = shapeInvoices([{ id: 999, status: "draft" }]);
     expect(result.invoices[0].totalAmount).toBe(0);
-    expect(result.invoices[0].amountPaid).toBe(0);
     expect(result.invoices[0].amountDue).toBe(0);
-    expect(result.invoices[0].pastDueDays).toBe(0);
+    // amountPaid and pastDueDays omitted when zero
+    expect(result.invoices[0].amountPaid).toBeUndefined();
+    expect(result.invoices[0].pastDueDays).toBeUndefined();
     expect(result.totalAmount).toBe(0);
     expect(result.byStatus["draft"].count).toBe(1);
   });
@@ -1479,5 +1482,104 @@ describe("shapeBills", () => {
     const result = shapeBills([{ id: 103, amount: 7500, amount_due: 7500, status: "unpaid" }]);
     expect(result.bills[0].totalAmount).toBe(7500);
     expect(result.totalAmount).toBe(7500);
+  });
+});
+
+// --- Department shaping ---
+
+describe("shapeDepartments", () => {
+  const departments = [
+    {
+      id: 1,
+      name: "Engineering",
+      description: "Product development",
+      is_active: true,
+      parent: null,
+      parent_name: null,
+      entity: 10,
+      entity_name: "US Entity",
+    },
+    {
+      id: 2,
+      name: "Marketing",
+      description: "Growth team",
+      is_active: true,
+      parent: null,
+      entity: 10,
+      entity_name: "US Entity",
+    },
+    {
+      id: 3,
+      name: "Atomic Theory",
+      description: null,
+      is_active: false,
+      parent: 1,
+      parent_name: "Engineering",
+      entity: 20,
+      entity_name: "UK Entity",
+    },
+  ];
+
+  it("computes total count", () => {
+    const result = shapeDepartments(departments);
+    expect(result.totalDepartments).toBe(3);
+  });
+
+  it("shapes individual department fields", () => {
+    const result = shapeDepartments(departments);
+    const eng = result.departments[0];
+    expect(eng.id).toBe(1);
+    expect(eng.name).toBe("Engineering");
+    expect(eng.description).toBe("Product development");
+    expect(eng.isActive).toBe(true);
+    expect(eng.parentId).toBeNull();
+    expect(eng.parentName).toBeNull();
+    expect(eng.entityId).toBe(10);
+    expect(eng.entityName).toBe("US Entity");
+  });
+
+  it("resolves parent department info", () => {
+    const result = shapeDepartments(departments);
+    const at = result.departments[2];
+    expect(at.parentId).toBe(1);
+    expect(at.parentName).toBe("Engineering");
+    expect(at.isActive).toBe(false);
+  });
+
+  it("handles empty list", () => {
+    const result = shapeDepartments([]);
+    expect(result.totalDepartments).toBe(0);
+    expect(result.departments).toHaveLength(0);
+  });
+
+  it("handles camelCase field names", () => {
+    const result = shapeDepartments([
+      {
+        id: 5,
+        name: "Sales",
+        isActive: true,
+        parentId: 2,
+        parentName: "Marketing",
+        entityId: 10,
+        entityName: "US Entity",
+      },
+    ]);
+    const d = result.departments[0];
+    expect(d.isActive).toBe(true);
+    expect(d.parentId).toBe(2);
+    expect(d.parentName).toBe("Marketing");
+    expect(d.entityId).toBe(10);
+    expect(d.entityName).toBe("US Entity");
+  });
+
+  it("defaults missing optional fields", () => {
+    const result = shapeDepartments([{ id: 6, name: "Minimal" }]);
+    const d = result.departments[0];
+    expect(d.description).toBeNull();
+    expect(d.isActive).toBe(true);
+    expect(d.parentId).toBeNull();
+    expect(d.parentName).toBeNull();
+    expect(d.entityId).toBeNull();
+    expect(d.entityName).toBeNull();
   });
 });

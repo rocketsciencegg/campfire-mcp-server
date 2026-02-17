@@ -1,6 +1,7 @@
 # campfire-mcp-server
 
 set shell := ["bash", "-cu"]
+set dotenv-load
 
 # Default: list available commands
 default:
@@ -36,6 +37,10 @@ bump level="patch":
     # README.md — version tags in npx install URLs
     sed -i '' -E "s/#v[0-9]+\.[0-9]+\.[0-9]+/#v$new/g" README.md
     echo "Updated: package.json, src/index.ts, README.md → $new"
+
+# Run integration tests (requires CAMPFIRE_API_KEY in .env or environment)
+test-integration:
+    npm run test:integration
 
 # Clean build artifacts
 clean:

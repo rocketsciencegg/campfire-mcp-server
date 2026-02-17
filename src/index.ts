@@ -34,6 +34,7 @@ import {
   shapeBudgetDetail,
   shapeUncategorizedTransactions,
   shapeBills,
+  shapeDepartments,
 } from "./helpers.js";
 
 // Campfire uses apiKey auth with "Token <key>" format
@@ -63,7 +64,7 @@ function errorResult(toolName: string, err: unknown) {
 function createServer() {
 const server = new McpServer({
   name: "campfire-mcp-server",
-  version: "2.1.1",
+  version: "2.2.0",
 });
 
 server.registerTool(
@@ -83,25 +84,25 @@ server.registerTool(
 
       // Fetch current month statements
       const [monthIncome, monthBalance, monthCashFlow] = await Promise.all([
-        (financialStatementsApi as any).caApiGetIncomeStatementRetrieve(
-          monthRange.dateFrom, monthRange.dateTo, "monthly", entityId
-        ),
-        (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
-          monthRange.dateFrom, monthRange.dateTo, "monthly", entityId
-        ),
-        (financialStatementsApi as any).caApiGetCashFlowRetrieve(
-          monthRange.dateFrom, monthRange.dateTo, "monthly", entityId
-        ),
+        (financialStatementsApi as any).caApiGetIncomeStatementRetrieve({
+          startDate: monthRange.dateFrom, endDate: monthRange.dateTo, cadence: "monthly", entity: entityId,
+        }),
+        (financialStatementsApi as any).caApiGetBalanceSheetRetrieve({
+          startDate: monthRange.dateFrom, endDate: monthRange.dateTo, cadence: "monthly", entity: entityId,
+        }),
+        (financialStatementsApi as any).caApiGetCashFlowRetrieve({
+          startDate: monthRange.dateFrom, endDate: monthRange.dateTo, cadence: "monthly", entity: entityId,
+        }),
       ]);
 
       // Fetch YTD statements
       const [ytdIncome, ytdBalance] = await Promise.all([
-        (financialStatementsApi as any).caApiGetIncomeStatementRetrieve(
-          ytdRange.dateFrom, ytdRange.dateTo, "monthly", entityId
-        ),
-        (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
-          ytdRange.dateFrom, ytdRange.dateTo, "monthly", entityId
-        ),
+        (financialStatementsApi as any).caApiGetIncomeStatementRetrieve({
+          startDate: ytdRange.dateFrom, endDate: ytdRange.dateTo, cadence: "monthly", entity: entityId,
+        }),
+        (financialStatementsApi as any).caApiGetBalanceSheetRetrieve({
+          startDate: ytdRange.dateFrom, endDate: ytdRange.dateTo, cadence: "monthly", entity: entityId,
+        }),
       ]);
 
       const monthLabel = now.toLocaleString("default", { month: "long", year: "numeric" });
@@ -147,7 +148,9 @@ server.registerTool(
         const range = getMonthRange(i, now);
         monthlyPromises.push(
           (financialStatementsApi as any)
-            .caApiGetIncomeStatementRetrieve(range.dateFrom, range.dateTo, "monthly", entityId)
+            .caApiGetIncomeStatementRetrieve({
+              startDate: range.dateFrom, endDate: range.dateTo, cadence: "monthly", entity: entityId,
+            })
             .then((resp: any) => ({
               label: new Date(range.dateFrom).toLocaleString("default", { month: "short", year: "numeric" }),
               data: resp.data,
@@ -157,9 +160,9 @@ server.registerTool(
 
       // Fetch latest balance sheet for cash position
       const currentMonth = getCurrentMonthRange(now);
-      const balancePromise = (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
-        currentMonth.dateFrom, currentMonth.dateTo, "monthly", entityId
-      );
+      const balancePromise = (financialStatementsApi as any).caApiGetBalanceSheetRetrieve({
+        startDate: currentMonth.dateFrom, endDate: currentMonth.dateTo, cadence: "monthly", entity: entityId,
+      });
 
       const [monthlyStatements, balanceResp] = await Promise.all([
         Promise.all(monthlyPromises),
@@ -186,20 +189,25 @@ server.registerTool(
   "income_statement",
   {
     description:
-      "Generate an income statement (P&L) for a specified period. Shows revenue, expenses, and net income.",
+      "Generate an income statement (P&L) for a specified period. Shows revenue, expenses, and net income. Use groupBy to break down by department or other dimensions.",
     inputSchema: {
       dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
       cadence: z.enum(["monthly", "quarterly", "yearly"]).optional()
         .describe("Reporting cadence (default: monthly)"),
       entityId: z.number().optional().describe("Filter by entity ID"),
+      groupBy: z.string().optional().describe("Group results by dimension (e.g. 'department')"),
     },
   },
-  async ({ dateFrom, dateTo, cadence, entityId }) => {
+  async ({ dateFrom, dateTo, cadence, entityId, groupBy }) => {
     try {
-      const resp = await (financialStatementsApi as any).caApiGetIncomeStatementRetrieve(
-        dateFrom, dateTo, cadence, entityId
-      );
+      const resp = await (financialStatementsApi as any).caApiGetIncomeStatementRetrieve({
+        startDate: dateFrom,
+        endDate: dateTo,
+        cadence,
+        entity: entityId,
+        groupBy,
+      });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
       };
@@ -213,20 +221,25 @@ server.registerTool(
   "balance_sheet",
   {
     description:
-      "Generate a balance sheet showing assets, liabilities, and equity for a specified period.",
+      "Generate a balance sheet showing assets, liabilities, and equity for a specified period. Use groupBy to break down by department or other dimensions.",
     inputSchema: {
       dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
       cadence: z.enum(["monthly", "quarterly", "yearly"]).optional()
         .describe("Reporting cadence (default: monthly)"),
       entityId: z.number().optional().describe("Filter by entity ID"),
+      groupBy: z.string().optional().describe("Group results by dimension (e.g. 'department')"),
     },
   },
-  async ({ dateFrom, dateTo, cadence, entityId }) => {
+  async ({ dateFrom, dateTo, cadence, entityId, groupBy }) => {
     try {
-      const resp = await (financialStatementsApi as any).caApiGetBalanceSheetRetrieve(
-        dateFrom, dateTo, cadence, entityId
-      );
+      const resp = await (financialStatementsApi as any).caApiGetBalanceSheetRetrieve({
+        startDate: dateFrom,
+        endDate: dateTo,
+        cadence,
+        entity: entityId,
+        groupBy,
+      });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
       };
@@ -240,20 +253,25 @@ server.registerTool(
   "cash_flow_statement",
   {
     description:
-      "Generate a cash flow statement showing operating, investing, and financing activities.",
+      "Generate a cash flow statement showing operating, investing, and financing activities. Use groupBy to break down by department or other dimensions.",
     inputSchema: {
       dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
       dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
       cadence: z.enum(["monthly", "quarterly", "yearly"]).optional()
         .describe("Reporting cadence (default: monthly)"),
       entityId: z.number().optional().describe("Filter by entity ID"),
+      groupBy: z.string().optional().describe("Group results by dimension (e.g. 'department')"),
     },
   },
-  async ({ dateFrom, dateTo, cadence, entityId }) => {
+  async ({ dateFrom, dateTo, cadence, entityId, groupBy }) => {
     try {
-      const resp = await (financialStatementsApi as any).caApiGetCashFlowRetrieve(
-        dateFrom, dateTo, cadence, entityId
-      );
+      const resp = await (financialStatementsApi as any).caApiGetCashFlowRetrieve({
+        startDate: dateFrom,
+        endDate: dateTo,
+        cadence,
+        entity: entityId,
+        groupBy,
+      });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
       };
@@ -373,23 +391,13 @@ server.registerTool(
       // Fetch unpaid items which include past_due_days for aging analysis
       let raw: any[] = [];
       if (agingType === "ar") {
-        const resp = await (arApi as any).coaApiV1InvoiceList(
-          undefined,      // client
-          undefined,      // contract
-          undefined,      // currency
-          undefined,      // download
-          asOfDate,       // endDate
-          entityId,       // entity
-          undefined,      // invoiceNumber
-          200,            // limit
-          0,              // offset
-          undefined,      // q
-          undefined,      // refNumber
-          undefined,      // sentStatus
-          undefined,      // sort
-          undefined,      // startDate
-          "unpaid",       // status
-        );
+        const resp = await (arApi as any).coaApiV1InvoiceList({
+          endDate: asOfDate,
+          entity: entityId,
+          limit: 200,
+          offset: 0,
+          status: "unpaid",
+        });
         const invoices = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
         raw = invoices.map((inv: any) => ({
           customer_name: inv.client_name ?? inv.clientName,
@@ -399,22 +407,14 @@ server.registerTool(
           due_date: inv.due_date ?? inv.dueDate,
         }));
       } else {
-        const resp = await (apApi as any).coaApiV1BillRetrieve(
-          undefined,      // currency
-          undefined,      // download
-          asOfDate,       // endDate
-          entityId,       // entity
-          undefined,      // includeDeleted
-          undefined,      // lastModifiedAtGte
-          undefined,      // lastModifiedAtLte
-          200,            // limit
-          0,              // offset
-          undefined,      // q
-          undefined,      // sort
-          undefined,      // startDate
-          "unpaid",       // status
-          vendorId,       // vendor
-        );
+        const resp = await (apApi as any).coaApiV1BillRetrieve({
+          endDate: asOfDate,
+          entity: entityId,
+          limit: 200,
+          offset: 0,
+          status: "unpaid",
+          vendor: vendorId,
+        });
         const bills = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
         raw = bills.map((b: any) => ({
           vendor_name: b.vendor_name ?? b.vendorName,
@@ -505,9 +505,12 @@ server.registerTool(
   },
   async ({ startDate, endDate, entityId, departmentId }) => {
     try {
-      const resp = await (financialStatementsApi as any).caApiGetTrialBalanceRetrieve(
-        departmentId, endDate, entityId, undefined, undefined, startDate
-      );
+      const resp = await (financialStatementsApi as any).caApiGetTrialBalanceRetrieve({
+        department: departmentId,
+        endDate,
+        entity: entityId,
+        startDate,
+      });
       const result = shapeTrialBalance(resp.data);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -535,27 +538,21 @@ server.registerTool(
   },
   async ({ status, startDate, endDate, clientId, q, limit, offset }) => {
     try {
-      const resp = await (arApi as any).coaApiV1InvoiceList(
-        clientId,       // client
-        undefined,      // contract
-        undefined,      // currency
-        undefined,      // download
-        endDate,        // endDate
-        undefined,      // entity
-        undefined,      // invoiceNumber
-        limit ?? 50,    // limit
-        offset ?? 0,    // offset
-        q,              // q
-        undefined,      // refNumber
-        undefined,      // sentStatus
-        undefined,      // sort
-        startDate,      // startDate
-        status,         // status
-      );
+      const resp = await (arApi as any).coaApiV1InvoiceList({
+        client: clientId,
+        endDate,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+        q,
+        startDate,
+        status,
+      });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
       const result = shapeInvoices(raw);
+      // Strip null/undefined values to minimize token usage
+      const compact = JSON.stringify(result, (_k, v) => v ?? undefined, 2);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: compact }],
       };
     } catch (err) {
       return errorResult("get_invoices", err);
@@ -681,22 +678,16 @@ server.registerTool(
   },
   async ({ status, vendorId, entityId, startDate, endDate, q, limit, offset }) => {
     try {
-      const resp = await (apApi as any).coaApiV1BillRetrieve(
-        undefined,      // currency
-        undefined,      // download
-        endDate,        // endDate
-        entityId,       // entity
-        undefined,      // includeDeleted
-        undefined,      // lastModifiedAtGte
-        undefined,      // lastModifiedAtLte
-        limit ?? 50,    // limit
-        offset ?? 0,    // offset
-        q,              // q
-        undefined,      // sort
-        startDate,      // startDate
-        status,         // status
-        vendorId,       // vendor
-      );
+      const resp = await (apApi as any).coaApiV1BillRetrieve({
+        endDate,
+        entity: entityId,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+        q,
+        startDate,
+        status,
+        vendor: vendorId,
+      });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
       const result = shapeBills(raw);
       return {
@@ -704,6 +695,39 @@ server.registerTool(
       };
     } catch (err) {
       return errorResult("get_bills", err);
+    }
+  }
+);
+
+// --- DEPARTMENT TOOLS ---
+
+server.registerTool(
+  "get_departments",
+  {
+    description:
+      "List departments with optional search and filtering. Use this to discover department IDs for filtering financial statements (via groupBy), transactions, trial balances, and budgets.",
+    inputSchema: {
+      q: z.string().optional().describe("Search by department name"),
+      includeInactive: z.boolean().optional().describe("Include inactive departments (default: false)"),
+      limit: z.number().optional().describe("Max results (default: 100)"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ q, includeInactive, limit, offset }) => {
+    try {
+      const resp = await (companyApi as any).coaApiDepartmentList({
+        q,
+        includeInactive,
+        limit: limit ?? 100,
+        offset: offset ?? 0,
+      });
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeDepartments(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_departments", err);
     }
   }
 );
