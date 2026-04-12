@@ -17,6 +17,7 @@ import {
   shapeBills,
   shapeDepartments,
   shapeAccounts,
+  shapeCreditMemos,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -1685,5 +1686,138 @@ describe("shapeAccounts", () => {
     expect(a.parentId).toBeNull();
     expect(a.balance).toBeNull();
     expect(a.description).toBeNull();
+  });
+});
+
+// --- Credit memo shaping ---
+
+describe("shapeCreditMemos", () => {
+  const creditMemos = [
+    {
+      id: 1,
+      credit_memo_number: "CM-001",
+      credit_memo_date: "2026-01-15",
+      client_name: "Acme Corp",
+      entity_name: "US Entity",
+      contract_name: "Contract A",
+      application_status: "open",
+      total_amount: 5000,
+      amount_used: 0,
+      amount_remaining: 5000,
+      currency: "USD",
+      message_on_credit_memo: "Refund for Q4",
+      lines: [{ id: 1 }, { id: 2 }],
+    },
+    {
+      id: 2,
+      credit_memo_number: "CM-002",
+      credit_memo_date: "2026-02-01",
+      client_name: "Acme Corp",
+      entity_name: "US Entity",
+      application_status: "used",
+      total_amount: 3000,
+      amount_used: 3000,
+      amount_remaining: 0,
+      currency: "USD",
+      lines: [{ id: 3 }],
+    },
+    {
+      id: 3,
+      credit_memo_number: "CM-003",
+      credit_memo_date: "2026-02-10",
+      client_name: "Beta Inc",
+      entity_name: "UK Entity",
+      application_status: "partially_used",
+      total_amount: 8000,
+      amount_used: 2000,
+      amount_remaining: 6000,
+      currency: "GBP",
+      lines: [{ id: 4 }, { id: 5 }, { id: 6 }],
+    },
+  ];
+
+  it("computes aggregate totals", () => {
+    const result = shapeCreditMemos(creditMemos);
+    expect(result.totalCreditMemos).toBe(3);
+    expect(result.totalAmount).toBe(16000);
+    expect(result.totalUsed).toBe(5000);
+    expect(result.totalRemaining).toBe(11000);
+  });
+
+  it("groups by status", () => {
+    const result = shapeCreditMemos(creditMemos);
+    expect(result.byStatus["open"].count).toBe(1);
+    expect(result.byStatus["open"].total).toBe(5000);
+    expect(result.byStatus["used"].count).toBe(1);
+    expect(result.byStatus["used"].total).toBe(3000);
+    expect(result.byStatus["partially_used"].count).toBe(1);
+    expect(result.byStatus["partially_used"].total).toBe(8000);
+  });
+
+  it("shapes individual credit memo fields", () => {
+    const result = shapeCreditMemos(creditMemos);
+    const cm = result.creditMemos[0];
+    expect(cm.id).toBe(1);
+    expect(cm.creditMemoNumber).toBe("CM-001");
+    expect(cm.creditMemoDate).toBe("2026-01-15");
+    expect(cm.clientName).toBe("Acme Corp");
+    expect(cm.entityName).toBe("US Entity");
+    expect(cm.contractName).toBe("Contract A");
+    expect(cm.status).toBe("open");
+    expect(cm.totalAmount).toBe(5000);
+    expect(cm.amountUsed).toBe(0);
+    expect(cm.amountRemaining).toBe(5000);
+    expect(cm.currency).toBe("USD");
+    expect(cm.message).toBe("Refund for Q4");
+    expect(cm.lineCount).toBe(2);
+  });
+
+  it("handles empty list", () => {
+    const result = shapeCreditMemos([]);
+    expect(result.totalCreditMemos).toBe(0);
+    expect(result.totalAmount).toBe(0);
+    expect(result.totalUsed).toBe(0);
+    expect(result.totalRemaining).toBe(0);
+    expect(result.byStatus).toEqual({});
+    expect(result.creditMemos).toHaveLength(0);
+  });
+
+  it("handles camelCase field names", () => {
+    const result = shapeCreditMemos([
+      {
+        id: 10,
+        creditMemoNumber: "CM-010",
+        creditMemoDate: "2026-03-01",
+        clientName: "Gamma LLC",
+        entityName: "US Entity",
+        applicationStatus: "voided",
+        totalAmount: 1000,
+        amountUsed: 0,
+        amountRemaining: 0,
+        messageOnCreditMemo: "Voided",
+      },
+    ]);
+    const cm = result.creditMemos[0];
+    expect(cm.creditMemoNumber).toBe("CM-010");
+    expect(cm.clientName).toBe("Gamma LLC");
+    expect(cm.status).toBe("voided");
+    expect(cm.message).toBe("Voided");
+  });
+
+  it("defaults missing optional fields", () => {
+    const result = shapeCreditMemos([{ id: 20 }]);
+    const cm = result.creditMemos[0];
+    expect(cm.creditMemoNumber).toBeNull();
+    expect(cm.creditMemoDate).toBeNull();
+    expect(cm.clientName).toBeNull();
+    expect(cm.entityName).toBeNull();
+    expect(cm.contractName).toBeNull();
+    expect(cm.status).toBe("unknown");
+    expect(cm.totalAmount).toBe(0);
+    expect(cm.amountUsed).toBe(0);
+    expect(cm.amountRemaining).toBe(0);
+    expect(cm.currency).toBeNull();
+    expect(cm.message).toBeNull();
+    expect(cm.lineCount).toBe(0);
   });
 });

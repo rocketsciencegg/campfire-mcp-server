@@ -32,6 +32,7 @@ import {
   shapeBills,
   shapeDepartments,
   shapeAccounts,
+  shapeCreditMemos,
   getCurrentMonthRange,
   getCurrentYTDRange,
   getMonthRange,
@@ -616,7 +617,59 @@ describe("get_invoices", () => {
   });
 });
 
-// ─── 15. get_budgets ───────────────────────────────────────────────────────
+// ─── 15. get_credit_memos ─────────────────────────────────────────────────
+
+describe("get_credit_memos", () => {
+  it("returns credit memos with shaped output", async () => {
+    const resp = await (arApi as any).coaApiV1CreditMemoList({
+      limit: 10,
+      offset: 0,
+    });
+    const raw = extractRaw(resp);
+    expect(Array.isArray(raw)).toBe(true);
+
+    const result = shapeCreditMemos(raw);
+    expect(typeof result.totalCreditMemos).toBe("number");
+    expect(typeof result.totalAmount).toBe("number");
+    expect(typeof result.totalUsed).toBe("number");
+    expect(typeof result.totalRemaining).toBe("number");
+    expect(result).toHaveProperty("byStatus");
+  });
+
+  it("filters by status", async () => {
+    const resp = await (arApi as any).coaApiV1CreditMemoList({
+      status: "open",
+      limit: 5,
+      offset: 0,
+    });
+    const raw = extractRaw(resp);
+    expect(Array.isArray(raw)).toBe(true);
+    for (const cm of raw) {
+      expect(cm.application_status).toBe("open");
+    }
+  });
+
+  it("filters by date range", async () => {
+    const resp = await (arApi as any).coaApiV1CreditMemoList({
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+      limit: 5,
+      offset: 0,
+    });
+    expect(Array.isArray(extractRaw(resp))).toBe(true);
+  });
+
+  it("supports search (q param)", async () => {
+    const resp = await (arApi as any).coaApiV1CreditMemoList({
+      q: "CM",
+      limit: 5,
+      offset: 0,
+    });
+    expect(Array.isArray(extractRaw(resp))).toBe(true);
+  });
+});
+
+// ─── 16. get_budgets ───────────────────────────────────────────────────────
 
 describe("get_budgets", () => {
   it("returns budget list", async () => {

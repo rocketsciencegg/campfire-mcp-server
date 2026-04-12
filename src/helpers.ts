@@ -832,6 +832,70 @@ export function shapeAccounts(accounts: any[]): AccountSummary {
   };
 }
 
+// --- Credit memo shaping ---
+
+export interface CreditMemoSummary {
+  totalCreditMemos: number;
+  totalAmount: number;
+  totalUsed: number;
+  totalRemaining: number;
+  byStatus: Record<string, { count: number; total: number }>;
+  creditMemos: any[];
+}
+
+export function shapeCreditMemos(creditMemos: any[]): CreditMemoSummary {
+  let totalAmount = 0;
+  let totalUsed = 0;
+  let totalRemaining = 0;
+  const byStatus: Record<string, { count: number; total: number }> = {};
+
+  const shaped = creditMemos.map((cm: any) => {
+    const amount = Number(cm.total_amount ?? cm.totalAmount ?? 0);
+    const used = Number(cm.amount_used ?? cm.amountUsed ?? 0);
+    const remaining = Number(cm.amount_remaining ?? cm.amountRemaining ?? 0);
+    totalAmount += amount;
+    totalUsed += used;
+    totalRemaining += remaining;
+
+    const status = cm.application_status ?? cm.applicationStatus ?? "unknown";
+    if (!byStatus[status]) byStatus[status] = { count: 0, total: 0 };
+    byStatus[status].count++;
+    byStatus[status].total += amount;
+
+    const lines = cm.lines ?? [];
+
+    return {
+      id: cm.id,
+      creditMemoNumber: cm.credit_memo_number ?? cm.creditMemoNumber ?? null,
+      creditMemoDate: cm.credit_memo_date ?? cm.creditMemoDate ?? null,
+      clientName: cm.client_name ?? cm.clientName ?? null,
+      entityName: cm.entity_name ?? cm.entityName ?? null,
+      contractName: cm.contract_name ?? cm.contractName ?? null,
+      status,
+      totalAmount: amount,
+      amountUsed: used,
+      amountRemaining: remaining,
+      currency: cm.currency ?? null,
+      message: cm.message_on_credit_memo ?? cm.messageOnCreditMemo ?? null,
+      lineCount: Array.isArray(lines) ? lines.length : 0,
+    };
+  });
+
+  // Round status bucket totals
+  for (const b of Object.values(byStatus)) {
+    b.total = round(b.total);
+  }
+
+  return {
+    totalCreditMemos: creditMemos.length,
+    totalAmount: round(totalAmount),
+    totalUsed: round(totalUsed),
+    totalRemaining: round(totalRemaining),
+    byStatus,
+    creditMemos: shaped,
+  };
+}
+
 // --- Department shaping ---
 
 export interface DepartmentSummary {
