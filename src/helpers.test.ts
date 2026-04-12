@@ -16,6 +16,7 @@ import {
   shapeUncategorizedTransactions,
   shapeBills,
   shapeDepartments,
+  shapeAccounts,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -1581,5 +1582,108 @@ describe("shapeDepartments", () => {
     expect(d.parentName).toBeNull();
     expect(d.entityId).toBeNull();
     expect(d.entityName).toBeNull();
+  });
+});
+
+// --- Account shaping ---
+
+describe("shapeAccounts", () => {
+  const accounts = [
+    {
+      id: 1,
+      name: "Cash",
+      number: "1000",
+      account_type: "ASSET",
+      account_sub_type: "Current Asset",
+      is_active: true,
+      parent: null,
+      balance: 50000,
+      description: "Operating cash account",
+    },
+    {
+      id: 2,
+      name: "Accounts Receivable",
+      number: "1100",
+      account_type: "ASSET",
+      account_sub_type: "Current Asset",
+      is_active: true,
+      balance: 25000,
+    },
+    {
+      id: 3,
+      name: "Rent Expense",
+      number: "6000",
+      account_type: "EXPENSE",
+      account_sub_type: "Operating Expense",
+      is_active: true,
+      balance: 12000,
+    },
+    {
+      id: 4,
+      name: "Old Account",
+      number: "9999",
+      account_type: "ASSET",
+      is_active: false,
+      balance: 0,
+    },
+  ];
+
+  it("computes total count and groups by type", () => {
+    const result = shapeAccounts(accounts);
+    expect(result.totalAccounts).toBe(4);
+    expect(result.byType["ASSET"]).toBe(3);
+    expect(result.byType["EXPENSE"]).toBe(1);
+  });
+
+  it("shapes individual account fields", () => {
+    const result = shapeAccounts(accounts);
+    const cash = result.accounts[0];
+    expect(cash.id).toBe(1);
+    expect(cash.name).toBe("Cash");
+    expect(cash.number).toBe("1000");
+    expect(cash.accountType).toBe("ASSET");
+    expect(cash.accountSubType).toBe("Current Asset");
+    expect(cash.isActive).toBe(true);
+    expect(cash.balance).toBe(50000);
+    expect(cash.description).toBe("Operating cash account");
+  });
+
+  it("handles empty list", () => {
+    const result = shapeAccounts([]);
+    expect(result.totalAccounts).toBe(0);
+    expect(result.byType).toEqual({});
+    expect(result.accounts).toHaveLength(0);
+  });
+
+  it("handles camelCase field names", () => {
+    const result = shapeAccounts([
+      {
+        id: 10,
+        account_name: "Revenue",
+        account_number: "4000",
+        accountType: "REVENUE",
+        accountSubType: "Sales",
+        isActive: true,
+        parentId: 5,
+      },
+    ]);
+    const a = result.accounts[0];
+    expect(a.name).toBe("Revenue");
+    expect(a.number).toBe("4000");
+    expect(a.accountType).toBe("REVENUE");
+    expect(a.accountSubType).toBe("Sales");
+    expect(a.isActive).toBe(true);
+    expect(a.parentId).toBe(5);
+  });
+
+  it("defaults missing optional fields", () => {
+    const result = shapeAccounts([{ id: 20, name: "Minimal" }]);
+    const a = result.accounts[0];
+    expect(a.accountType).toBe("Unknown");
+    expect(a.accountSubType).toBeNull();
+    expect(a.isActive).toBe(true);
+    expect(a.parentId).toBeNull();
+    expect(a.balance).toBeNull();
+    expect(a.description).toBeNull();
   });
 });

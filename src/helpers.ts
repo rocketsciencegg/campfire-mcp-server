@@ -797,6 +797,41 @@ export function shapeBills(bills: any[]): BillSummary {
   };
 }
 
+// --- Account shaping ---
+
+export interface AccountSummary {
+  totalAccounts: number;
+  byType: Record<string, number>;
+  accounts: any[];
+}
+
+export function shapeAccounts(accounts: any[]): AccountSummary {
+  const byType: Record<string, number> = {};
+
+  const shaped = accounts.map((a: any) => {
+    const accountType = a.account_type ?? a.accountType ?? a.type ?? "Unknown";
+    byType[accountType] = (byType[accountType] || 0) + 1;
+
+    return {
+      id: a.id,
+      name: a.name ?? a.account_name,
+      number: a.number ?? a.account_number,
+      accountType,
+      accountSubType: a.account_sub_type ?? a.accountSubType ?? a.sub_type ?? null,
+      isActive: a.is_active ?? a.isActive ?? true,
+      parentId: a.parent ?? a.parentId ?? null,
+      balance: a.balance != null ? Number(a.balance) : null,
+      description: a.description || null,
+    };
+  });
+
+  return {
+    totalAccounts: accounts.length,
+    byType,
+    accounts: shaped,
+  };
+}
+
 // --- Department shaping ---
 
 export interface DepartmentSummary {
