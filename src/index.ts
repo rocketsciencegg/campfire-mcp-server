@@ -325,23 +325,30 @@ server.registerTool(
   "get_accounts",
   {
     description:
-      "Retrieve chart of accounts with optional filtering by type, subtype, or search query. Auto-paginates to fetch all accounts, then filters client-side (the SDK only supports limit/offset).",
+      "Retrieve chart of accounts with optional filtering by type, subtype, or search query. Auto-paginates to fetch all matching accounts. Supports all account types: ASSET, LIABILITY, EQUITY, REVENUE, COGS, OPERATING_EXPENSES, OTHER_INCOME, OTHER_EXPENSE.",
     inputSchema: {
-      accountType: z.string().optional().describe("Filter by account type (e.g. ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE) — applied client-side"),
-      accountSubtype: z.string().optional().describe("Filter by account subtype — applied client-side"),
-      q: z.string().optional().describe("Search account names — applied client-side (case-insensitive)"),
+      accountType: z.string().optional().describe("Filter by account type (e.g. ASSET, LIABILITY, EQUITY, REVENUE, COGS, OPERATING_EXPENSES)"),
+      accountSubtype: z.string().optional().describe("Filter by account subtype (e.g. BANK, ACCOUNTS_RECEIVABLE, DEFERRED_REVENUE)"),
+      q: z.string().optional().describe("Search by account name or number"),
+      includeInactive: z.boolean().optional().describe("Include inactive accounts (default: true)"),
       limit: z.number().optional().describe("Page size for API calls (default: 100)"),
     },
   },
-  async ({ accountType, accountSubtype, q, limit }) => {
+  async ({ accountType, accountSubtype, q, includeInactive, limit }) => {
     try {
-      // Auto-paginate to fetch all accounts (SDK only supports limit/offset)
       const pageSize = limit ?? 100;
       let allAccounts: any[] = [];
       let offset = 0;
       const maxPages = 20;
+
+      // Use coaApiAccountBalanceSheetList — the unified account list endpoint
+      // that supports filtering by type, subtype, and search query
       for (let page = 0; page < maxPages; page++) {
-        const resp = await (companyApi as any).coaApiAccountList({
+        const resp = await (companyApi as any).coaApiAccountBalanceSheetList({
+          accountType,
+          accountSubtype,
+          q,
+          includeInactive,
           limit: pageSize,
           offset,
         });
@@ -349,30 +356,6 @@ server.registerTool(
         allAccounts = allAccounts.concat(items);
         if (items.length < pageSize) break;
         offset += pageSize;
-      }
-
-      // Client-side filtering (SDK doesn't support these params)
-      if (q) {
-        const lowerQ = q.toLowerCase();
-        allAccounts = allAccounts.filter((a: any) => {
-          const name = (a.name ?? a.account_name ?? "").toLowerCase();
-          const number = String(a.number ?? a.account_number ?? "").toLowerCase();
-          return name.includes(lowerQ) || number.includes(lowerQ);
-        });
-      }
-      if (accountType) {
-        const lowerType = accountType.toLowerCase();
-        allAccounts = allAccounts.filter((a: any) => {
-          const t = (a.account_type ?? a.accountType ?? a.type ?? "").toLowerCase();
-          return t === lowerType || t.includes(lowerType);
-        });
-      }
-      if (accountSubtype) {
-        const lowerSubtype = accountSubtype.toLowerCase();
-        allAccounts = allAccounts.filter((a: any) => {
-          const s = (a.account_sub_type ?? a.accountSubType ?? a.sub_type ?? a.subtype ?? "").toLowerCase();
-          return s === lowerSubtype || s.includes(lowerSubtype);
-        });
       }
 
       const result = shapeAccounts(allAccounts);

@@ -294,7 +294,7 @@ describe("get_transactions", () => {
 
 describe("get_accounts", () => {
   it("returns chart of accounts with shaped output", async () => {
-    const resp = await (companyApi as any).coaApiAccountList({ limit: 10 });
+    const resp = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 10 });
     const raw = extractRaw(resp);
     expect(Array.isArray(raw)).toBe(true);
     if (raw.length === 0) return;
@@ -308,23 +308,21 @@ describe("get_accounts", () => {
   });
 
   it("respects limit parameter", async () => {
-    const resp = await (companyApi as any).coaApiAccountList({ limit: 3 });
+    const resp = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 3 });
     const accounts = extractRaw(resp);
     expect(accounts.length).toBeLessThanOrEqual(3);
   });
 
   it("paginates to fetch all accounts", async () => {
-    // Fetch with small page size
-    const resp1 = await (companyApi as any).coaApiAccountList({ limit: 5, offset: 0 });
+    const resp1 = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 5, offset: 0 });
     const page1 = extractRaw(resp1);
 
-    const resp2 = await (companyApi as any).coaApiAccountList({ limit: 5, offset: 5 });
+    const resp2 = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 5, offset: 5 });
     const page2 = extractRaw(resp2);
 
     expect(Array.isArray(page1)).toBe(true);
     expect(Array.isArray(page2)).toBe(true);
 
-    // If both pages have data, they should be different accounts
     if (page1.length > 0 && page2.length > 0) {
       const ids1 = new Set(page1.map((a: any) => a.id));
       const overlap = page2.filter((a: any) => ids1.has(a.id));
@@ -332,40 +330,30 @@ describe("get_accounts", () => {
     }
   });
 
-  it("client-side filtering by account type works", async () => {
-    // Fetch a batch of accounts
-    const resp = await (companyApi as any).coaApiAccountList({ limit: 100 });
-    const raw = extractRaw(resp);
-    if (raw.length === 0) return;
-
-    // Get a type that exists
-    const firstType = raw[0].account_type ?? raw[0].accountType ?? raw[0].type;
-    if (!firstType) return;
-
-    // Filter client-side
-    const filtered = raw.filter((a: any) => {
-      const t = (a.account_type ?? a.accountType ?? a.type ?? "").toLowerCase();
-      return t === firstType.toLowerCase();
+  it("accepts accountType parameter without error", async () => {
+    const resp = await (companyApi as any).coaApiAccountBalanceSheetList({
+      accountType: "ASSET",
+      limit: 10,
     });
-    expect(filtered.length).toBeGreaterThan(0);
-    expect(filtered.length).toBeLessThanOrEqual(raw.length);
+    const raw = extractRaw(resp);
+    expect(Array.isArray(raw)).toBe(true);
   });
 
-  it("client-side search by name works", async () => {
-    const resp = await (companyApi as any).coaApiAccountList({ limit: 100 });
-    const raw = extractRaw(resp);
-    if (raw.length === 0) return;
+  it("filters by q (search) server-side", async () => {
+    const allResp = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 1 });
+    const all = extractRaw(allResp);
+    if (all.length === 0) return;
 
-    const firstName = raw[0].name ?? raw[0].account_name ?? "";
-    if (!firstName) return;
+    const name = all[0].name ?? all[0].account_name;
+    if (!name) return;
 
-    // Search by part of name
-    const searchTerm = firstName.slice(0, 3).toLowerCase();
-    const filtered = raw.filter((a: any) => {
-      const name = (a.name ?? a.account_name ?? "").toLowerCase();
-      return name.includes(searchTerm);
+    const searchResp = await (companyApi as any).coaApiAccountBalanceSheetList({
+      q: name,
+      limit: 50,
     });
-    expect(filtered.length).toBeGreaterThan(0);
+    const results = extractRaw(searchResp);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.some((a: any) => (a.name ?? a.account_name) === name)).toBe(true);
   });
 });
 
