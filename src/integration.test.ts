@@ -435,7 +435,7 @@ describe("get_customers", () => {
 // ─── 14. get_invoices ──────────────────────────────────────────────────────
 
 describe("get_invoices", () => {
-  it("returns shaped invoices with compact fields", async () => {
+  it("returns shaped invoices with compact fields and tax/net amounts", async () => {
     const resp = await (arApi as any).coaApiV1InvoiceList({
       limit: 5,
       offset: 0,
@@ -446,6 +446,8 @@ describe("get_invoices", () => {
     const result = shapeInvoices(raw);
     expect(typeof result.totalInvoices).toBe("number");
     expect(typeof result.totalAmount).toBe("number");
+    expect(typeof result.totalNetAmount).toBe("number");
+    expect(typeof result.totalTaxAmount).toBe("number");
     expect(typeof result.totalDue).toBe("number");
 
     // Verify compact shape — removed fields should not appear
@@ -455,7 +457,11 @@ describe("get_invoices", () => {
       expect(inv).toHaveProperty("invoiceNumber");
       expect(inv).toHaveProperty("status");
       expect(inv).toHaveProperty("totalAmount");
+      expect(inv).toHaveProperty("netAmount");
+      expect(inv).toHaveProperty("taxAmount");
       expect(inv).toHaveProperty("amountDue");
+      expect(typeof inv.netAmount).toBe("number");
+      expect(typeof inv.taxAmount).toBe("number");
       // These were removed for compactness
       expect(inv.contractName).toBeUndefined();
       expect(inv.entityName).toBeUndefined();

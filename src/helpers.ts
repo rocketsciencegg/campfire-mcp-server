@@ -361,6 +361,8 @@ export function shapeCustomers(customers: any[]): CustomerSummary {
 export interface InvoiceSummary {
   totalInvoices: number;
   totalAmount: number;
+  totalNetAmount: number;
+  totalTaxAmount: number;
   totalPaid: number;
   totalDue: number;
   byStatus: Record<string, { count: number; totalAmount: number; totalDue: number }>;
@@ -369,6 +371,8 @@ export interface InvoiceSummary {
 
 export function shapeInvoices(invoices: any[]): InvoiceSummary {
   let totalAmount = 0;
+  let totalNetAmount = 0;
+  let totalTaxAmount = 0;
   let totalPaid = 0;
   let totalDue = 0;
   const byStatus: Record<string, { count: number; totalAmount: number; totalDue: number }> = {};
@@ -380,6 +384,19 @@ export function shapeInvoices(invoices: any[]): InvoiceSummary {
     totalAmount += amount;
     totalPaid += paid;
     totalDue += due;
+
+    // Compute net and tax amounts from line items
+    const lines = inv.lines ?? inv.line_items ?? inv.lineItems ?? [];
+    let netAmount = 0;
+    let taxAmount = 0;
+    if (Array.isArray(lines) && lines.length > 0) {
+      for (const line of lines) {
+        netAmount += Number(line.amount ?? 0);
+        taxAmount += Number(line.tax ?? 0);
+      }
+    }
+    totalNetAmount += netAmount;
+    totalTaxAmount += taxAmount;
 
     const status = inv.status ?? "unknown";
     if (!byStatus[status]) {
@@ -399,6 +416,8 @@ export function shapeInvoices(invoices: any[]): InvoiceSummary {
       invoiceDate: inv.invoiceDate ?? inv.invoice_date,
       dueDate: inv.dueDate ?? inv.due_date,
       totalAmount: amount,
+      netAmount: round(netAmount),
+      taxAmount: round(taxAmount),
       amountDue: due,
     };
     if (paid > 0) shaped.amountPaid = paid;
@@ -416,6 +435,8 @@ export function shapeInvoices(invoices: any[]): InvoiceSummary {
   return {
     totalInvoices: invoices.length,
     totalAmount: round(totalAmount),
+    totalNetAmount: round(totalNetAmount),
+    totalTaxAmount: round(totalTaxAmount),
     totalPaid: round(totalPaid),
     totalDue: round(totalDue),
     byStatus,

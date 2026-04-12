@@ -627,6 +627,10 @@ describe("shapeInvoices", () => {
       pastDueDays: 0,
       currency: "USD",
       paymentTermName: "Net 30",
+      lines: [
+        { amount: 8000, tax: 1600, description: "Consulting" },
+        { amount: 400, tax: 0, description: "Expenses" },
+      ],
     },
     {
       id: 102,
@@ -644,6 +648,9 @@ describe("shapeInvoices", () => {
       pastDueDays: 0,
       currency: "USD",
       paymentTermName: "Net 30",
+      lines: [
+        { amount: 4166.67, tax: 833.33, description: "Services" },
+      ],
     },
     {
       id: 103,
@@ -660,6 +667,9 @@ describe("shapeInvoices", () => {
       pastDueDays: 69,
       currency: "USD",
       paymentTermName: "Net 30",
+      lines: [
+        { amount: 6666.67, tax: 1333.33, description: "Consulting" },
+      ],
     },
   ];
 
@@ -669,6 +679,29 @@ describe("shapeInvoices", () => {
     expect(result.totalAmount).toBe(23000);
     expect(result.totalPaid).toBe(5000);
     expect(result.totalDue).toBe(18000);
+  });
+
+  it("computes net and tax amounts from line items", () => {
+    const result = shapeInvoices(invoices);
+    // INV-001: net=8400, tax=1600; INV-002: net=4166.67, tax=833.33; INV-003: net=6666.67, tax=1333.33
+    expect(result.totalNetAmount).toBe(19233.34);
+    expect(result.totalTaxAmount).toBe(3766.66);
+
+    // Per-invoice
+    expect(result.invoices[0].netAmount).toBe(8400);
+    expect(result.invoices[0].taxAmount).toBe(1600);
+    expect(result.invoices[1].netAmount).toBe(4166.67);
+    expect(result.invoices[1].taxAmount).toBe(833.33);
+    expect(result.invoices[2].netAmount).toBe(6666.67);
+    expect(result.invoices[2].taxAmount).toBe(1333.33);
+  });
+
+  it("handles invoices without line items (zero net/tax)", () => {
+    const result = shapeInvoices([{ id: 999, totalAmount: 5000, amountDue: 5000, status: "unpaid" }]);
+    expect(result.invoices[0].netAmount).toBe(0);
+    expect(result.invoices[0].taxAmount).toBe(0);
+    expect(result.totalNetAmount).toBe(0);
+    expect(result.totalTaxAmount).toBe(0);
   });
 
   it("groups by status", () => {
@@ -736,6 +769,8 @@ describe("shapeInvoices", () => {
     const result = shapeInvoices([]);
     expect(result.totalInvoices).toBe(0);
     expect(result.totalAmount).toBe(0);
+    expect(result.totalNetAmount).toBe(0);
+    expect(result.totalTaxAmount).toBe(0);
     expect(result.totalPaid).toBe(0);
     expect(result.totalDue).toBe(0);
     expect(result.invoices).toHaveLength(0);
