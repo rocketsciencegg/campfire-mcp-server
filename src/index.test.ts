@@ -33,8 +33,9 @@ describe("campfire-mcp-server", () => {
       "get_budget_details",
       "get_uncategorized_transactions",
       "get_bills",
+      "get_departments",
     ];
-    expect(expectedTools).toHaveLength(17);
+    expect(expectedTools).toHaveLength(18);
     for (const tool of expectedTools) {
       expect(tool).toBeTruthy();
       expect(typeof tool).toBe("string");

@@ -35,6 +35,7 @@ import {
   shapeUncategorizedTransactions,
   shapeBills,
   shapeDepartments,
+  shapeAccounts,
 } from "./helpers.js";
 
 // Campfire uses apiKey auth with "Token <key>" format
@@ -349,21 +350,42 @@ server.registerTool(
   "get_accounts",
   {
     description:
-      "Retrieve chart of accounts with optional filtering by type or search query.",
+      "Retrieve chart of accounts with optional filtering by type, subtype, or search query. Auto-paginates to fetch all matching accounts. Supports all account types: ASSET, LIABILITY, EQUITY, REVENUE, COGS, OPERATING_EXPENSES, OTHER_INCOME, OTHER_EXPENSE.",
     inputSchema: {
-      accountType: z.string().optional().describe("Filter by account type"),
-      accountSubtype: z.string().optional().describe("Filter by account subtype"),
-      q: z.string().optional().describe("Search query"),
-      limit: z.number().optional().describe("Max results (default: 100)"),
+      accountType: z.string().optional().describe("Filter by account type (e.g. ASSET, LIABILITY, EQUITY, REVENUE, COGS, OPERATING_EXPENSES)"),
+      accountSubtype: z.string().optional().describe("Filter by account subtype (e.g. BANK, ACCOUNTS_RECEIVABLE, DEFERRED_REVENUE)"),
+      q: z.string().optional().describe("Search by account name or number"),
+      includeInactive: z.boolean().optional().describe("Include inactive accounts (default: true)"),
+      limit: z.number().optional().describe("Page size for API calls (default: 100)"),
     },
   },
-  async ({ accountType, accountSubtype, q, limit }) => {
+  async ({ accountType, accountSubtype, q, includeInactive, limit }) => {
     try {
-      const resp = await (companyApi as any).coaApiAccountList({
-        limit: limit ?? 100,
-      });
+      const pageSize = limit ?? 100;
+      let allAccounts: any[] = [];
+      let offset = 0;
+      const maxPages = 20;
+
+      // Use coaApiAccountBalanceSheetList — the unified account list endpoint
+      // that supports filtering by type, subtype, and search query
+      for (let page = 0; page < maxPages; page++) {
+        const resp = await (companyApi as any).coaApiAccountBalanceSheetList({
+          accountType,
+          accountSubtype,
+          q,
+          includeInactive,
+          limit: pageSize,
+          offset,
+        });
+        const items = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+        allAccounts = allAccounts.concat(items);
+        if (items.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      const result = shapeAccounts(allAccounts);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       return errorResult("get_accounts", err);

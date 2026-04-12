@@ -31,6 +31,7 @@ import {
   shapeUncategorizedTransactions,
   shapeBills,
   shapeDepartments,
+  shapeAccounts,
   getCurrentMonthRange,
   getCurrentYTDRange,
   getMonthRange,
@@ -338,22 +339,67 @@ describe("get_transactions", () => {
 // ─── 9. get_accounts ───────────────────────────────────────────────────────
 
 describe("get_accounts", () => {
-  it("returns chart of accounts", async () => {
-    const resp = await (companyApi as any).coaApiAccountList({ limit: 10 });
-    const data = resp.data;
-    // Could be paginated or direct array
-    const accounts = Array.isArray(data) ? data : data?.results || [];
-    expect(Array.isArray(accounts)).toBe(true);
-    if (accounts.length === 0) return;
+  it("returns chart of accounts with shaped output", async () => {
+    const resp = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 10 });
+    const raw = extractRaw(resp);
+    expect(Array.isArray(raw)).toBe(true);
+    if (raw.length === 0) return;
 
-    expect(accounts[0]).toHaveProperty("id");
-    expect(accounts[0]).toHaveProperty("name");
+    const result = shapeAccounts(raw);
+    expect(result.totalAccounts).toBeGreaterThan(0);
+    expect(result.accounts[0]).toHaveProperty("id");
+    expect(result.accounts[0]).toHaveProperty("name");
+    expect(result.accounts[0]).toHaveProperty("accountType");
+    expect(Object.keys(result.byType).length).toBeGreaterThan(0);
   });
 
   it("respects limit parameter", async () => {
-    const resp = await (companyApi as any).coaApiAccountList({ limit: 3 });
+    const resp = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 3 });
     const accounts = extractRaw(resp);
     expect(accounts.length).toBeLessThanOrEqual(3);
+  });
+
+  it("paginates to fetch all accounts", async () => {
+    const resp1 = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 5, offset: 0 });
+    const page1 = extractRaw(resp1);
+
+    const resp2 = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 5, offset: 5 });
+    const page2 = extractRaw(resp2);
+
+    expect(Array.isArray(page1)).toBe(true);
+    expect(Array.isArray(page2)).toBe(true);
+
+    if (page1.length > 0 && page2.length > 0) {
+      const ids1 = new Set(page1.map((a: any) => a.id));
+      const overlap = page2.filter((a: any) => ids1.has(a.id));
+      expect(overlap.length).toBe(0);
+    }
+  });
+
+  it("accepts accountType parameter without error", async () => {
+    const resp = await (companyApi as any).coaApiAccountBalanceSheetList({
+      accountType: "ASSET",
+      limit: 10,
+    });
+    const raw = extractRaw(resp);
+    expect(Array.isArray(raw)).toBe(true);
+  });
+
+  it("filters by q (search) server-side", async () => {
+    const allResp = await (companyApi as any).coaApiAccountBalanceSheetList({ limit: 1 });
+    const all = extractRaw(allResp);
+    if (all.length === 0) return;
+
+    const name = all[0].name ?? all[0].account_name;
+    if (!name) return;
+
+    const searchResp = await (companyApi as any).coaApiAccountBalanceSheetList({
+      q: name,
+      limit: 50,
+    });
+    const results = extractRaw(searchResp);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.some((a: any) => (a.name ?? a.account_name) === name)).toBe(true);
   });
 });
 
