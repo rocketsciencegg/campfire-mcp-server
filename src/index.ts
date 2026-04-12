@@ -36,6 +36,7 @@ import {
   shapeBills,
   shapeDepartments,
   shapeAccounts,
+  shapeCreditMemos,
 } from "./helpers.js";
 
 // Campfire uses apiKey auth with "Token <key>" format
@@ -823,6 +824,46 @@ server.registerTool(
       };
     } catch (err) {
       return errorResult("get_bills", err);
+    }
+  }
+);
+
+// --- CREDIT MEMO TOOLS ---
+
+server.registerTool(
+  "get_credit_memos",
+  {
+    description:
+      "Retrieve credit memos with filtering by status, date range, client, and search query. Returns summary with totals, amount used/remaining, and breakdown by status. Status values: open, partially_used, used, voided.",
+    inputSchema: {
+      status: z.enum(["open", "partially_used", "used", "voided"]).optional()
+        .describe("Filter by status: open, partially_used, used, voided"),
+      startDate: z.string().optional().describe("Filter credit memos on or after this date (YYYY-MM-DD)"),
+      endDate: z.string().optional().describe("Filter credit memos on or before this date (YYYY-MM-DD)"),
+      clientId: z.number().optional().describe("Filter by client ID"),
+      q: z.string().optional().describe("Search credit memo numbers, messages, client names"),
+      limit: z.number().optional().describe("Max results (default: 50)"),
+      offset: z.number().optional().describe("Pagination offset"),
+    },
+  },
+  async ({ status, startDate, endDate, clientId, q, limit, offset }) => {
+    try {
+      const resp = await (arApi as any).coaApiV1CreditMemoList({
+        client: clientId ? [clientId] : undefined,
+        endDate,
+        limit: limit ?? 50,
+        offset: offset ?? 0,
+        q,
+        startDate,
+        status,
+      });
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeCreditMemos(raw);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_credit_memos", err);
     }
   }
 );
