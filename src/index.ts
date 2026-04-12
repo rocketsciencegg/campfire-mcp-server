@@ -284,6 +284,63 @@ server.registerTool(
 // --- ENRICHED EXISTING TOOLS ---
 
 server.registerTool(
+  "get_transaction",
+  {
+    description:
+      "Retrieve a single transaction by ID with full detail: account, vendor, department, journal entry, amounts (debit/credit in native and book currencies), dates, tags, and linked invoices/bills.",
+    inputSchema: {
+      id: z.number().describe("The transaction ID"),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve2({ id });
+      const t = resp.data;
+
+      const shaped = {
+        id: t.id,
+        postedAt: t.posted_at,
+        accountName: t.account_name,
+        accountNumber: t.account_number,
+        accountType: t.account_type,
+        accountSubtype: t.account_subtype,
+        vendorName: t.vendor_name,
+        departmentName: t.department_name,
+        entityName: t.entity_name,
+        journalMemo: t.journal_memo,
+        journalType: t.journal_type_name ?? t.journal_type,
+        debitAmount: t.debit_amount != null ? Number(t.debit_amount) : null,
+        creditAmount: t.credit_amount != null ? Number(t.credit_amount) : null,
+        amount: Number(t.amount ?? 0),
+        currency: t.currency,
+        exchangeRate: t.exchange_rate,
+        merchantName: t.merchant_name,
+        bankDescription: t.bank_description,
+        note: t.note,
+        invoiceId: t.invoice_id || null,
+        invoiceNumber: t.invoice_number || null,
+        billId: t.bill_id || null,
+        billNumber: t.bill_number || null,
+        tags: Array.isArray(t.tags) ? t.tags.map((tag: any) => tag.name ?? tag) : [],
+        needsReview: t.needs_review ?? false,
+        hasMatches: t.has_matches ?? false,
+        suggestedAccountName: t.suggested_account_name,
+        suggestedAccountNumber: t.suggested_account_number,
+        balanceAfterTransaction: t.balance_after_transaction,
+        createdAt: t.created_at,
+        lastModifiedAt: t.last_modified_at,
+      };
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shaped, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_transaction", err);
+    }
+  }
+);
+
+server.registerTool(
   "get_transactions",
   {
     description:

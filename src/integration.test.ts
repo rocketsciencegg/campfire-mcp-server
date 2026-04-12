@@ -260,7 +260,32 @@ describe("get_burn_rate", () => {
   });
 });
 
-// ─── 8. get_transactions ───────────────────────────────────────────────────
+// ─── 8. get_transaction (single) ──────────────────────────────────────────
+
+describe("get_transaction", () => {
+  it("retrieves a single transaction by ID with full detail", async () => {
+    // First get a transaction ID from the list
+    const listResp = await (coreAccountingApi as any).coaApiTransactionRetrieve({
+      params: { limit: 1 },
+    });
+    const raw = extractRaw(listResp);
+    if (raw.length === 0) return;
+
+    const txnId = raw[0].id;
+    const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve2({ id: txnId });
+    const t = resp.data;
+
+    expect(t).toBeDefined();
+    expect(t.id).toBe(txnId);
+    expect(t).toHaveProperty("account_name");
+    expect(t).toHaveProperty("account_type");
+    expect(t).toHaveProperty("posted_at");
+    expect(t).toHaveProperty("debit_amount");
+    expect(t).toHaveProperty("credit_amount");
+  });
+});
+
+// ─── 9. get_transactions ───────────────────────────────────────────────────
 
 describe("get_transactions", () => {
   it("returns transactions with default limit", async () => {
