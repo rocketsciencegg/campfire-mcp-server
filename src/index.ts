@@ -287,30 +287,55 @@ server.registerTool(
   "get_transactions",
   {
     description:
-      "Retrieve general ledger transactions with filtering. Returns enriched summary with total debits/credits and breakdown by account type.",
+      "Retrieve general ledger transactions with filtering. Returns enriched summary with total debits/credits and breakdown by account type. Auto-paginates to fetch all matching results.",
     inputSchema: {
-      dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
-      dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
+      dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD) — filters transactions on or after this date"),
+      dateTo: z.string().optional().describe("End date (YYYY-MM-DD) — filters transactions on or before this date"),
       accountId: z.number().optional().describe("Filter by account ID"),
       accountType: z.string().optional().describe("Filter by account type"),
       vendorId: z.number().optional().describe("Filter by vendor ID"),
       departmentId: z.number().optional().describe("Filter by department ID"),
-      limit: z.number().optional().describe("Max results (default: 100)"),
+      limit: z.number().optional().describe("Max results per page (default: 100)"),
     },
   },
   async ({ dateFrom, dateTo, accountId, accountType, vendorId, departmentId, limit }) => {
     try {
-      const params: Record<string, any> = { limit: limit ?? 100 };
+      const pageSize = limit ?? 100;
+      const params: Record<string, any> = { limit: pageSize };
       if (accountId) params.account = accountId;
       if (accountType) params.account_type = accountType;
       if (vendorId) params.vendor = vendorId;
       if (departmentId) params.department = departmentId;
-      if (dateFrom) params.posted_at_gte = dateFrom;
-      if (dateTo) params.posted_at_lte = dateTo;
+      if (dateFrom) params.start_date = dateFrom;
+      if (dateTo) params.end_date = dateTo;
 
-      const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({ params });
-      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = enrichTransactions(raw);
+      // Auto-paginate to collect all results
+      let allTransactions: any[] = [];
+      let offset = 0;
+      const maxPages = 20;
+      for (let page = 0; page < maxPages; page++) {
+        params.offset = offset;
+        const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({ params });
+        const items = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+        allTransactions = allTransactions.concat(items);
+        // Stop if we got fewer than a full page (no more results)
+        if (items.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      // Client-side date filtering as safety net (in case API ignores date params)
+      if (dateFrom || dateTo) {
+        allTransactions = allTransactions.filter((t: any) => {
+          const d = t.posted_at ?? t.date ?? t.transaction_date;
+          if (!d) return true;
+          const ds = String(d).slice(0, 10);
+          if (dateFrom && ds < dateFrom) return false;
+          if (dateTo && ds > dateTo) return false;
+          return true;
+        });
+      }
+
+      const result = enrichTransactions(allTransactions);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
@@ -638,19 +663,43 @@ server.registerTool(
   },
   async ({ accountId, vendorId, departmentId, dateFrom, dateTo, limit }) => {
     try {
+      const pageSize = limit ?? 100;
       const params: Record<string, any> = {
         account_type: "UNCATEGORIZED",
-        limit: limit ?? 100,
+        limit: pageSize,
       };
       if (accountId) params.account = accountId;
       if (vendorId) params.vendor = vendorId;
       if (departmentId) params.department = departmentId;
-      if (dateFrom) params.posted_at_gte = dateFrom;
-      if (dateTo) params.posted_at_lte = dateTo;
+      if (dateFrom) params.start_date = dateFrom;
+      if (dateTo) params.end_date = dateTo;
 
-      const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({ params });
-      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = shapeUncategorizedTransactions(raw);
+      // Auto-paginate
+      let allTransactions: any[] = [];
+      let offset = 0;
+      const maxPages = 20;
+      for (let page = 0; page < maxPages; page++) {
+        params.offset = offset;
+        const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({ params });
+        const items = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+        allTransactions = allTransactions.concat(items);
+        if (items.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      // Client-side date filtering as safety net
+      if (dateFrom || dateTo) {
+        allTransactions = allTransactions.filter((t: any) => {
+          const d = t.posted_at ?? t.date ?? t.transaction_date;
+          if (!d) return true;
+          const ds = String(d).slice(0, 10);
+          if (dateFrom && ds < dateFrom) return false;
+          if (dateTo && ds > dateTo) return false;
+          return true;
+        });
+      }
+
+      const result = shapeUncategorizedTransactions(allTransactions);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };

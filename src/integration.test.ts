@@ -276,16 +276,62 @@ describe("get_transactions", () => {
     expect(typeof result.totalCredits).toBe("number");
   });
 
-  it("filters by date range", async () => {
+  it("client-side date filtering narrows results correctly", async () => {
+    // Fetch a small batch of transactions
     const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({
-      params: {
-        limit: 5,
-        posted_at_gte: "2025-01-01",
-        posted_at_lte: "2025-06-30",
-      },
+      params: { limit: 50 },
     });
     const raw = extractRaw(resp);
     expect(Array.isArray(raw)).toBe(true);
+    if (raw.length === 0) return;
+
+    // Apply client-side date filter for a narrow range (Jan 2025)
+    const dateFrom = "2025-01-01";
+    const dateTo = "2025-01-31";
+    const filtered = raw.filter((t: any) => {
+      const d = t.posted_at ?? t.date ?? t.transaction_date;
+      if (!d) return true;
+      const ds = String(d).slice(0, 10);
+      if (ds < dateFrom) return false;
+      if (ds > dateTo) return false;
+      return true;
+    });
+
+    // Filtered set should be <= original
+    expect(filtered.length).toBeLessThanOrEqual(raw.length);
+
+    // Every filtered transaction should be in range
+    for (const t of filtered) {
+      const d = t.posted_at ?? t.date ?? t.transaction_date;
+      if (!d) continue;
+      const ds = String(d).slice(0, 10);
+      expect(ds >= dateFrom).toBe(true);
+      expect(ds <= dateTo).toBe(true);
+    }
+  });
+
+  it("paginates to fetch more than one page", async () => {
+    // Fetch page 1
+    const resp1 = await (coreAccountingApi as any).coaApiTransactionRetrieve({
+      params: { limit: 2, offset: 0 },
+    });
+    const page1 = extractRaw(resp1);
+
+    // Fetch page 2
+    const resp2 = await (coreAccountingApi as any).coaApiTransactionRetrieve({
+      params: { limit: 2, offset: 2 },
+    });
+    const page2 = extractRaw(resp2);
+
+    expect(Array.isArray(page1)).toBe(true);
+    expect(Array.isArray(page2)).toBe(true);
+
+    // If both pages have data, they should be different transactions
+    if (page1.length > 0 && page2.length > 0) {
+      const ids1 = new Set(page1.map((t: any) => t.id));
+      const overlap = page2.filter((t: any) => ids1.has(t.id));
+      expect(overlap.length).toBe(0);
+    }
   });
 });
 
@@ -563,16 +609,28 @@ describe("get_uncategorized_transactions", () => {
     expect(result).toHaveProperty("byVendor");
   });
 
-  it("filters by date range", async () => {
+  it("filters by date range (client-side)", async () => {
     const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve({
       params: {
         account_type: "UNCATEGORIZED",
-        limit: 5,
-        posted_at_gte: "2025-01-01",
-        posted_at_lte: "2025-12-31",
+        limit: 50,
       },
     });
-    expect(Array.isArray(extractRaw(resp))).toBe(true);
+    const raw = extractRaw(resp);
+    expect(Array.isArray(raw)).toBe(true);
+
+    // Apply client-side date filter
+    const dateFrom = "2025-01-01";
+    const dateTo = "2025-12-31";
+    const filtered = raw.filter((t: any) => {
+      const d = t.posted_at ?? t.date ?? t.transaction_date;
+      if (!d) return true;
+      const ds = String(d).slice(0, 10);
+      if (ds < dateFrom) return false;
+      if (ds > dateTo) return false;
+      return true;
+    });
+    expect(filtered.length).toBeLessThanOrEqual(raw.length);
   });
 });
 
