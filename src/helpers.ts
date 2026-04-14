@@ -1,6 +1,13 @@
 // Pure data transformation helpers for Campfire MCP server.
 // No API calls — all functions take pre-fetched data and return shaped results.
 
+/** Controls how many fields each shaping function returns.
+ *  - "summary"  — compact: IDs, names, statuses, key amounts (listing/dashboard)
+ *  - "normal"   — summary + addresses, contacts, dates, department, contract info
+ *  - "full"     — normal + line items, payments, attachments, tax/compliance fields
+ */
+export type DetailLevel = "summary" | "normal" | "full";
+
 export interface DateRange {
   dateFrom: string;
   dateTo: string;
@@ -265,7 +272,7 @@ export interface ContractSummary {
   contracts: any[];
 }
 
-export function analyzeContracts(contracts: any[]): ContractSummary {
+export function analyzeContracts(contracts: any[], detail: DetailLevel = "normal"): ContractSummary {
   let totalRevenue = 0;
   let totalBilled = 0;
   let totalUnbilled = 0;
@@ -278,7 +285,8 @@ export function analyzeContracts(contracts: any[]): ContractSummary {
     totalBilled += billed;
     totalUnbilled += unbilled;
 
-    return {
+    // summary: compact core fields
+    const base: Record<string, any> = {
       id: c.id,
       name: c.name || c.contract_name,
       clientName: c.client_name || c.clientName,
@@ -290,6 +298,41 @@ export function analyzeContracts(contracts: any[]): ContractSummary {
       startDate: c.start_date || c.startDate,
       endDate: c.end_date || c.endDate,
     };
+
+    if (detail === "summary") return base;
+
+    // normal: add deal info, financial detail, billing, department
+    base.dealName = c.deal_name ?? c.dealName ?? null;
+    base.dealId = c.deal_id ?? c.dealId ?? null;
+    base.crmLink = c.crm_link ?? c.crmLink ?? null;
+    base.contractLink = c.contract_link ?? c.contractLink ?? null;
+    base.totalMrr = Number(c.total_mrr ?? c.totalMrr ?? 0);
+    base.totalPaid = Number(c.total_paid ?? c.totalPaid ?? 0);
+    base.totalOutstanding = Number(c.total_outstanding ?? c.totalOutstanding ?? 0);
+    base.totalDeferredRevenue = Number(c.total_deferred_revenue ?? c.totalDeferredRevenue ?? 0);
+    base.totalContractValue = Number(c.total_contract_value ?? c.totalContractValue ?? 0);
+    base.currency = c.currency ?? null;
+    base.billingFrequency = c.billing_frequency ?? c.billingFrequency ?? null;
+    base.purchaseOrderNumber = c.purchase_order_number ?? c.purchaseOrderNumber ?? null;
+    base.departmentName = c.department_name ?? c.departmentName ?? null;
+    base.parentDepartmentName = c.parent_department_name ?? c.parentDepartmentName ?? null;
+    base.entityName = c.entity_name ?? c.entityName ?? null;
+
+    if (detail === "normal") return base;
+
+    // full: add auto-renew, evergreen, tags, entity currency, attachments
+    base.autoRenew = c.auto_renew ?? c.autoRenew ?? null;
+    base.autoRenewDuration = c.auto_renew_duration ?? c.autoRenewDuration ?? null;
+    base.autoRenewInvoice = c.auto_renew_invoice ?? c.autoRenewInvoice ?? null;
+    base.isEvergreen = c.is_evergreen ?? c.isEvergreen ?? null;
+    base.effectiveEndDate = c.effective_end_date ?? c.effectiveEndDate ?? null;
+    base.workingEndDate = c.working_end_date ?? c.workingEndDate ?? null;
+    base.tags = Array.isArray(c.tags) ? c.tags.map((t: any) => t.name ?? t) : [];
+    base.entityCurrency = c.entity_currency ?? c.entityCurrency ?? null;
+    base.exchangeRate = c.exchange_rate ?? c.exchangeRate ?? null;
+    base.attachments = Array.isArray(c.attachments) ? c.attachments : [];
+
+    return base;
   });
 
   return {
@@ -312,7 +355,7 @@ export interface CustomerSummary {
   customers: any[];
 }
 
-export function shapeCustomers(customers: any[]): CustomerSummary {
+export function shapeCustomers(customers: any[], detail: DetailLevel = "normal"): CustomerSummary {
   let totalRevenue = 0;
   let totalMrr = 0;
   let totalOutstanding = 0;
@@ -325,7 +368,8 @@ export function shapeCustomers(customers: any[]): CustomerSummary {
     totalMrr += mrr;
     totalOutstanding += outstanding;
 
-    return {
+    // summary: compact core fields
+    const base: Record<string, any> = {
       id: c.id,
       name: c.name,
       companyName: c.company_name ?? c.companyName,
@@ -345,6 +389,68 @@ export function shapeCustomers(customers: any[]): CustomerSummary {
       paymentTerms: c.payment_term_name_display ?? c.paymentTermNameDisplay,
       status: c.status,
     };
+
+    if (detail === "summary") return base;
+
+    // normal: add identity, addresses, contacts, notes, credit memo totals
+    base.firstName = c.first_name ?? c.firstName ?? null;
+    base.lastName = c.last_name ?? c.lastName ?? null;
+    base.dba = c.dba ?? null;
+    base.website = c.website ?? null;
+    base.mobileNumber = c.mobile_number ?? c.mobileNumber ?? null;
+    base.notes = c.notes ?? null;
+    base.invoiceMessage = c.invoice_message ?? c.invoiceMessage ?? null;
+
+    // Primary address
+    base.addressStreet1 = c.address_street_1 ?? c.addressStreet1 ?? null;
+    base.addressStreet2 = c.address_street_2 ?? c.addressStreet2 ?? null;
+    base.city = c.city ?? null;
+    base.state = c.state ?? null;
+    base.zipCode = c.zip_code ?? c.zipCode ?? null;
+    base.country = c.country ?? null;
+
+    // Billing address
+    base.billingAddressStreet1 = c.billing_address_street_1 ?? c.billingAddressStreet1 ?? null;
+    base.billingAddressStreet2 = c.billing_address_street_2 ?? c.billingAddressStreet2 ?? null;
+    base.billingCity = c.billing_city ?? c.billingCity ?? null;
+    base.billingState = c.billing_state ?? c.billingState ?? null;
+    base.billingZipCode = c.billing_zip_code ?? c.billingZipCode ?? null;
+    base.billingCountry = c.billing_country ?? c.billingCountry ?? null;
+    base.billingAddressee = c.billing_addressee ?? c.billingAddressee ?? null;
+    base.shippingAddressee = c.shipping_addressee ?? c.shippingAddressee ?? null;
+
+    // Contacts array
+    const rawContacts = c.contacts ?? [];
+    base.contacts = Array.isArray(rawContacts)
+      ? rawContacts.map((ct: any) => ({
+          id: ct.id,
+          name: ct.name ?? null,
+          firstName: ct.first_name ?? ct.firstName ?? null,
+          lastName: ct.last_name ?? ct.lastName ?? null,
+          email: ct.email ?? null,
+          phone: ct.phone_number ?? ct.phoneNumber ?? null,
+          mobileNumber: ct.mobile_number ?? ct.mobileNumber ?? null,
+        }))
+      : [];
+
+    // Credit memo totals
+    base.totalCreditMemos = Number(c.total_credit_memos ?? c.totalCreditMemos ?? 0);
+    base.creditMemoApplied = Number(c.credit_memo_applied ?? c.creditMemoApplied ?? 0);
+    base.creditMemoAvailable = Number(c.credit_memo_available ?? c.creditMemoAvailable ?? 0);
+    base.pendingContracts = Number(c.pending_contracts ?? c.pendingContracts ?? 0);
+
+    if (detail === "normal") return base;
+
+    // full: add tax/compliance, external IDs
+    base.abbreviation = c.abbreviation ?? null;
+    base.businessIdSsn = c.business_id_ssn ?? c.businessIdSsn ?? null;
+    base.is1099 = c.is_1099 ?? c.is1099 ?? null;
+    base.vatNumber = c.vat_number ?? c.vatNumber ?? null;
+    base.entityUseCode = c.entity_use_code ?? c.entityUseCode ?? null;
+    base.externalId = c.external_id ?? c.externalId ?? null;
+    base.source = c.source ?? null;
+
+    return base;
   });
 
   return {
@@ -369,7 +475,7 @@ export interface InvoiceSummary {
   invoices: any[];
 }
 
-export function shapeInvoices(invoices: any[]): InvoiceSummary {
+export function shapeInvoices(invoices: any[], detail: DetailLevel = "normal"): InvoiceSummary {
   let totalAmount = 0;
   let totalNetAmount = 0;
   let totalTaxAmount = 0;
@@ -406,9 +512,8 @@ export function shapeInvoices(invoices: any[]): InvoiceSummary {
     byStatus[status].totalAmount += amount;
     byStatus[status].totalDue += due;
 
-    // Compact shape: drop low-value fields (contractName, entityName, paidDate,
-    // currency, paymentTerms) to reduce token usage for LLM consumers.
-    const shaped: Record<string, any> = {
+    // summary: compact core fields
+    const base: Record<string, any> = {
       id: inv.id,
       invoiceNumber: inv.invoiceNumber ?? inv.invoice_number,
       clientName: inv.clientName ?? inv.client_name,
@@ -420,10 +525,62 @@ export function shapeInvoices(invoices: any[]): InvoiceSummary {
       taxAmount: round(taxAmount),
       amountDue: due,
     };
-    if (paid > 0) shaped.amountPaid = paid;
+    if (paid > 0) base.amountPaid = paid;
     const pastDue = Number(inv.pastDueDays ?? inv.past_due_days ?? 0);
-    if (pastDue > 0) shaped.pastDueDays = pastDue;
-    return shaped;
+    if (pastDue > 0) base.pastDueDays = pastDue;
+
+    if (detail === "summary") return base;
+
+    // normal: add contract, dates, department, addresses, messaging
+    base.contractName = inv.contractName ?? inv.contract_name ?? null;
+    base.contractId = inv.contract ?? inv.contractId ?? null;
+    base.entityName = inv.entityName ?? inv.entity_name ?? null;
+    base.departmentName = inv.departmentName ?? inv.department_name ?? null;
+    base.tags = Array.isArray(inv.tags) ? inv.tags.map((t: any) => t.name ?? t) : [];
+    base.paidDate = inv.paidDate ?? inv.paid_date ?? null;
+    base.sentDate = inv.sentDate ?? inv.sent_date ?? null;
+    base.lastSentAt = inv.lastSentAt ?? inv.last_sent_at ?? null;
+    base.periodStart = inv.periodStart ?? inv.period_start ?? null;
+    base.periodEnd = inv.periodEnd ?? inv.period_end ?? null;
+    base.currency = inv.currency ?? null;
+    base.exchangeRate = inv.exchangeRate ?? inv.exchange_rate ?? null;
+    base.terms = inv.paymentTermName ?? inv.payment_term_name ?? null;
+    base.purchaseOrderNumber = inv.purchaseOrderNumber ?? inv.purchase_order_number ?? null;
+    base.messageOnInvoice = inv.messageOnInvoice ?? inv.message_on_invoice ?? null;
+    base.billingAddress = inv.billingAddress ?? inv.billing_address ?? null;
+    base.billingAddressee = inv.billingAddressee ?? inv.billing_addressee ?? null;
+    base.shippingAddress = inv.shippingAddress ?? inv.shipping_address ?? null;
+    base.shippingAddressee = inv.shippingAddressee ?? inv.shipping_addressee ?? null;
+
+    if (detail === "normal") return base;
+
+    // full: add line items, payments, email history
+    base.lines = Array.isArray(lines)
+      ? lines.map((l: any) => ({
+          description: l.description ?? null,
+          quantity: l.quantity != null ? Number(l.quantity) : null,
+          rate: l.rate != null ? Number(l.rate) : null,
+          amount: Number(l.amount ?? 0),
+          tax: Number(l.tax ?? 0),
+          departmentName: l.departmentName ?? l.department_name ?? null,
+          tags: Array.isArray(l.tags) ? l.tags.map((t: any) => t.name ?? t) : [],
+          productName: l.productName ?? l.product_name ?? null,
+        }))
+      : [];
+    const payments = inv.payments ?? [];
+    base.payments = Array.isArray(payments)
+      ? payments.map((p: any) => ({
+          amount: Number(p.amount ?? 0),
+          paymentDate: p.paymentDate ?? p.payment_date ?? null,
+          source: p.source ?? null,
+          paymentType: p.paymentType ?? p.payment_type ?? null,
+        }))
+      : [];
+    base.discount = inv.discount != null ? Number(inv.discount) : null;
+    base.refNumber = inv.refNumber ?? inv.ref_number ?? null;
+    base.emails = Array.isArray(inv.emails) ? inv.emails : [];
+
+    return base;
   });
 
   // Round status bucket totals
@@ -745,6 +902,79 @@ export function shapeUncategorizedTransactions(transactions: any[]): Uncategoriz
   };
 }
 
+// --- Vendor shaping ---
+
+export interface VendorSummary {
+  totalVendors: number;
+  vendors: any[];
+}
+
+export function shapeVendors(vendors: any[], detail: DetailLevel = "normal"): VendorSummary {
+  const shaped = vendors.map((v: any) => {
+    // summary: compact core fields
+    const base: Record<string, any> = {
+      id: v.id,
+      name: v.name,
+      companyName: v.company_name ?? v.companyName ?? null,
+      email: v.email ?? null,
+      phone: v.phone_number ?? v.phoneNumber ?? null,
+      status: v.status ?? null,
+      vendorType: v.vendor_type ?? v.vendorType ?? null,
+    };
+
+    if (detail === "summary") return base;
+
+    // normal: add identity, addresses, contacts, notes, payment terms
+    base.firstName = v.first_name ?? v.firstName ?? null;
+    base.lastName = v.last_name ?? v.lastName ?? null;
+    base.dba = v.dba ?? null;
+    base.website = v.website ?? null;
+    base.mobileNumber = v.mobile_number ?? v.mobileNumber ?? null;
+    base.notes = v.notes ?? null;
+    base.paymentTerms = v.payment_term_name_display ?? v.paymentTermNameDisplay ?? null;
+    base.currency = v.currency ?? null;
+
+    // Primary address
+    base.addressStreet1 = v.address_street_1 ?? v.addressStreet1 ?? null;
+    base.addressStreet2 = v.address_street_2 ?? v.addressStreet2 ?? null;
+    base.city = v.city ?? null;
+    base.state = v.state ?? null;
+    base.zipCode = v.zip_code ?? v.zipCode ?? null;
+    base.country = v.country ?? null;
+
+    // Contacts array
+    const rawContacts = v.contacts ?? [];
+    base.contacts = Array.isArray(rawContacts)
+      ? rawContacts.map((ct: any) => ({
+          id: ct.id,
+          name: ct.name ?? null,
+          firstName: ct.first_name ?? ct.firstName ?? null,
+          lastName: ct.last_name ?? ct.lastName ?? null,
+          email: ct.email ?? null,
+          phone: ct.phone_number ?? ct.phoneNumber ?? null,
+          mobileNumber: ct.mobile_number ?? ct.mobileNumber ?? null,
+        }))
+      : [];
+
+    if (detail === "normal") return base;
+
+    // full: add tax/compliance, external IDs
+    base.abbreviation = v.abbreviation ?? null;
+    base.is1099 = v.is_1099 ?? v.is1099 ?? null;
+    base.vatNumber = v.vat_number ?? v.vatNumber ?? null;
+    base.businessIdSsn = v.business_id_ssn ?? v.businessIdSsn ?? null;
+    base.externalId = v.external_id ?? v.externalId ?? null;
+    base.source = v.source ?? null;
+
+    return base;
+  });
+
+  return {
+    totalVendors: vendors.length,
+    vendors: shaped,
+  };
+}
+
 // --- Bill shaping ---
 
 export interface BillSummary {
@@ -757,7 +987,7 @@ export interface BillSummary {
   bills: any[];
 }
 
-export function shapeBills(bills: any[]): BillSummary {
+export function shapeBills(bills: any[], detail: DetailLevel = "normal"): BillSummary {
   let totalAmount = 0;
   let totalAmountDue = 0;
   let totalAmountPaid = 0;
@@ -784,7 +1014,8 @@ export function shapeBills(bills: any[]): BillSummary {
 
     const lines = b.lines ?? b.line_items ?? b.lineItems ?? [];
 
-    return {
+    // summary: compact core fields
+    const base: Record<string, any> = {
       id: b.id,
       billNumber: b.bill_number ?? b.billNumber ?? null,
       billDate: b.bill_date ?? b.billDate ?? null,
@@ -801,6 +1032,44 @@ export function shapeBills(bills: any[]): BillSummary {
       apAccountName: b.ap_account_name ?? b.apAccountName ?? null,
       messageOnBill: b.message_on_bill ?? b.messageOnBill ?? null,
     };
+
+    if (detail === "summary") return base;
+
+    // normal: add department, PO, currency, mailing address
+    base.departmentName = b.department_name ?? b.departmentName ?? null;
+    base.purchaseOrderNumber = b.purchase_order_number ?? b.purchaseOrderNumber ?? null;
+    base.currency = b.currency ?? null;
+    base.exchangeRate = b.exchangeRate ?? b.exchange_rate ?? null;
+    base.mailingAddress = b.mailing_address ?? b.mailingAddress ?? null;
+    base.billType = b.bill_type ?? b.billType ?? null;
+
+    if (detail === "normal") return base;
+
+    // full: add line items, payments, attachments
+    base.lines = Array.isArray(lines)
+      ? lines.map((l: any) => ({
+          accountName: l.account_name ?? l.accountName ?? null,
+          accountNumber: l.account_number ?? l.accountNumber ?? null,
+          departmentName: l.department_name ?? l.departmentName ?? null,
+          description: l.description ?? null,
+          amount: Number(l.amount ?? 0),
+          tax: Number(l.tax ?? 0),
+          tags: Array.isArray(l.tags) ? l.tags.map((t: any) => t.name ?? t) : [],
+        }))
+      : [];
+    const payments = b.payments ?? [];
+    base.payments = Array.isArray(payments)
+      ? payments.map((p: any) => ({
+          amount: Number(p.amount ?? 0),
+          paymentDate: p.paymentDate ?? p.payment_date ?? null,
+          source: p.source ?? null,
+        }))
+      : [];
+    base.taxBehavior = b.tax_behavior ?? b.taxBehavior ?? null;
+    base.attachments = Array.isArray(b.attachments) ? b.attachments : [];
+    base.externalRampId = b.external_ramp_id ?? b.externalRampId ?? null;
+
+    return base;
   });
 
   // Round group totals
