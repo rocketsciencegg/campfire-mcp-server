@@ -18,6 +18,7 @@ import {
   shapeDepartments,
   shapeAccounts,
   shapeCreditMemos,
+  shapeVendors,
 } from "./helpers.js";
 
 // --- Date helpers ---
@@ -716,18 +717,30 @@ describe("shapeInvoices", () => {
     expect(result.byStatus["paid"].totalDue).toBe(0);
   });
 
-  it("shapes individual invoice fields (compact)", () => {
+  it("shapes individual invoice fields (normal includes contract/entity/currency)", () => {
     const result = shapeInvoices(invoices);
     expect(result.invoices[0].invoiceNumber).toBe("INV-001");
     expect(result.invoices[0].clientName).toBe("Acme Corp");
     expect(result.invoices[0].status).toBe("unpaid");
     expect(result.invoices[0].totalAmount).toBe(10000);
     expect(result.invoices[0].amountDue).toBe(10000);
-    // Removed fields for compactness: contractName, entityName, currency, paymentTerms
+    // Normal detail includes these fields
+    expect(result.invoices[0].contractName).toBe("Project Alpha");
+    expect(result.invoices[0].entityName).toBe("Main Entity");
+    expect(result.invoices[0].currency).toBe("USD");
+    expect(result.invoices[0].terms).toBe("Net 30");
+  });
+
+  it("summary detail omits contract/entity/currency", () => {
+    const result = shapeInvoices(invoices, "summary");
+    expect(result.invoices[0].invoiceNumber).toBe("INV-001");
     expect(result.invoices[0].contractName).toBeUndefined();
     expect(result.invoices[0].entityName).toBeUndefined();
     expect(result.invoices[0].currency).toBeUndefined();
-    expect(result.invoices[0].paymentTerms).toBeUndefined();
+    expect(result.invoices[0].terms).toBeUndefined();
+    // summary should still have core fields
+    expect(result.invoices[0].totalAmount).toBe(10000);
+    expect(result.invoices[0].netAmount).toBe(8400);
   });
 
   it("omits amountPaid when zero", () => {
@@ -1854,5 +1867,629 @@ describe("shapeCreditMemos", () => {
     expect(cm.currency).toBeNull();
     expect(cm.message).toBeNull();
     expect(cm.lineCount).toBe(0);
+  });
+});
+
+// --- Vendor shaping ---
+
+describe("shapeVendors", () => {
+  const vendors = [
+    {
+      id: 1,
+      name: "Acme Supplies",
+      company_name: "Acme Supplies LLC",
+      email: "ap@acme.com",
+      phone_number: "555-1000",
+      status: "active",
+      vendor_type: "supplier",
+      first_name: "John",
+      last_name: "Doe",
+      dba: "Acme",
+      website: "https://acme.example.com",
+      mobile_number: "555-1001",
+      notes: "Preferred vendor",
+      payment_term_name_display: "Net 30",
+      currency: "USD",
+      address_street_1: "123 Main St",
+      address_street_2: "Suite 100",
+      city: "Springfield",
+      state: "IL",
+      zip_code: "62701",
+      country: "US",
+      contacts: [
+        { id: 10, name: "Jane Doe", first_name: "Jane", last_name: "Doe", email: "jane@acme.com", phone_number: "555-1002" },
+      ],
+      abbreviation: "ACME",
+      is_1099: true,
+      vat_number: "VAT123",
+      business_id_ssn: "12-3456789",
+      external_id: "EXT-001",
+      source: "import",
+      searchVector: "acme supplies ...",
+      searchText: "acme supplies llc",
+    },
+    {
+      id: 2,
+      name: "Beta Services",
+      email: "billing@beta.com",
+      status: "active",
+    },
+  ];
+
+  it("computes total count", () => {
+    const result = shapeVendors(vendors);
+    expect(result.totalVendors).toBe(2);
+  });
+
+  it("summary returns only core fields", () => {
+    const result = shapeVendors(vendors, "summary");
+    const v = result.vendors[0];
+    expect(v.id).toBe(1);
+    expect(v.name).toBe("Acme Supplies");
+    expect(v.companyName).toBe("Acme Supplies LLC");
+    expect(v.email).toBe("ap@acme.com");
+    expect(v.phone).toBe("555-1000");
+    expect(v.status).toBe("active");
+    expect(v.vendorType).toBe("supplier");
+    // Should NOT have normal/full fields
+    expect(v.firstName).toBeUndefined();
+    expect(v.addressStreet1).toBeUndefined();
+    expect(v.contacts).toBeUndefined();
+    expect(v.is1099).toBeUndefined();
+    // Internal fields should never be present
+    expect(v.searchVector).toBeUndefined();
+    expect(v.searchText).toBeUndefined();
+  });
+
+  it("normal (default) adds identity, address, contacts, notes", () => {
+    const result = shapeVendors(vendors);
+    const v = result.vendors[0];
+    // Core fields still present
+    expect(v.id).toBe(1);
+    expect(v.name).toBe("Acme Supplies");
+    // Normal-level fields
+    expect(v.firstName).toBe("John");
+    expect(v.lastName).toBe("Doe");
+    expect(v.dba).toBe("Acme");
+    expect(v.website).toBe("https://acme.example.com");
+    expect(v.mobileNumber).toBe("555-1001");
+    expect(v.notes).toBe("Preferred vendor");
+    expect(v.paymentTerms).toBe("Net 30");
+    expect(v.currency).toBe("USD");
+    expect(v.addressStreet1).toBe("123 Main St");
+    expect(v.addressStreet2).toBe("Suite 100");
+    expect(v.city).toBe("Springfield");
+    expect(v.state).toBe("IL");
+    expect(v.zipCode).toBe("62701");
+    expect(v.country).toBe("US");
+    expect(v.contacts).toHaveLength(1);
+    expect(v.contacts[0].name).toBe("Jane Doe");
+    expect(v.contacts[0].email).toBe("jane@acme.com");
+    // Should NOT have full-level fields
+    expect(v.is1099).toBeUndefined();
+    expect(v.vatNumber).toBeUndefined();
+    expect(v.externalId).toBeUndefined();
+  });
+
+  it("full adds tax/compliance and external IDs", () => {
+    const result = shapeVendors(vendors, "full");
+    const v = result.vendors[0];
+    // Normal fields present
+    expect(v.firstName).toBe("John");
+    expect(v.addressStreet1).toBe("123 Main St");
+    expect(v.contacts).toHaveLength(1);
+    // Full-level fields
+    expect(v.abbreviation).toBe("ACME");
+    expect(v.is1099).toBe(true);
+    expect(v.vatNumber).toBe("VAT123");
+    expect(v.businessIdSsn).toBe("12-3456789");
+    expect(v.externalId).toBe("EXT-001");
+    expect(v.source).toBe("import");
+  });
+
+  it("handles empty list", () => {
+    const result = shapeVendors([]);
+    expect(result.totalVendors).toBe(0);
+    expect(result.vendors).toHaveLength(0);
+  });
+
+  it("handles missing optional fields gracefully", () => {
+    const result = shapeVendors([{ id: 99, name: "Sparse" }]);
+    const v = result.vendors[0];
+    expect(v.email).toBeNull();
+    expect(v.phone).toBeNull();
+    expect(v.status).toBeNull();
+    expect(v.firstName).toBeNull();
+    expect(v.contacts).toHaveLength(0);
+    expect(v.addressStreet1).toBeNull();
+  });
+
+  it("handles camelCase field names", () => {
+    const result = shapeVendors([
+      {
+        id: 50,
+        name: "CamelVendor",
+        companyName: "CamelCo",
+        phoneNumber: "555-5555",
+        vendorType: "contractor",
+        firstName: "Alex",
+        lastName: "Smith",
+        mobileNumber: "555-5556",
+        paymentTermNameDisplay: "Net 45",
+        addressStreet1: "789 Oak Ave",
+        zipCode: "90210",
+        vatNumber: "VAT-CAMEL",
+        is1099: false,
+        externalId: "EXT-CAMEL",
+      },
+    ], "full");
+    const v = result.vendors[0];
+    expect(v.companyName).toBe("CamelCo");
+    expect(v.phone).toBe("555-5555");
+    expect(v.vendorType).toBe("contractor");
+    expect(v.firstName).toBe("Alex");
+    expect(v.mobileNumber).toBe("555-5556");
+    expect(v.paymentTerms).toBe("Net 45");
+    expect(v.addressStreet1).toBe("789 Oak Ave");
+    expect(v.zipCode).toBe("90210");
+    expect(v.vatNumber).toBe("VAT-CAMEL");
+    expect(v.is1099).toBe(false);
+    expect(v.externalId).toBe("EXT-CAMEL");
+  });
+});
+
+// --- Detail level tests ---
+
+describe("shapeCustomers detail levels", () => {
+  const customer = {
+    id: 1,
+    name: "Detail Corp",
+    company_name: "Detail Corporation",
+    email: "info@detail.com",
+    phone_number: "555-0001",
+    currency: "USD",
+    active_contracts: 2,
+    completed_contracts: 1,
+    total_contracts: 3,
+    total_revenue: 100000,
+    total_mrr: 8333,
+    total_billed: 80000,
+    total_unbilled: 20000,
+    total_paid: 75000,
+    total_outstanding: 5000,
+    total_deferred_revenue: 15000,
+    payment_term_name_display: "Net 30",
+    status: "active",
+    // Normal-level fields
+    first_name: "Alice",
+    last_name: "Wonder",
+    dba: "DetailCo",
+    website: "https://detail.example.com",
+    mobile_number: "555-0002",
+    notes: "VIP customer",
+    invoice_message: "Thank you for your business",
+    address_street_1: "100 First Ave",
+    address_street_2: "Floor 5",
+    city: "Metropolis",
+    state: "NY",
+    zip_code: "10001",
+    country: "US",
+    billing_address_street_1: "200 Billing Blvd",
+    billing_city: "Metropolis",
+    billing_state: "NY",
+    billing_zip_code: "10002",
+    billing_country: "US",
+    billing_addressee: "Accounts Payable",
+    shipping_addressee: "Warehouse",
+    contacts: [
+      { id: 10, name: "Bob Smith", first_name: "Bob", last_name: "Smith", email: "bob@detail.com", phone_number: "555-0003" },
+    ],
+    total_credit_memos: 2,
+    credit_memo_applied: 1000,
+    credit_memo_available: 500,
+    pending_contracts: 1,
+    // Full-level fields
+    abbreviation: "DET",
+    business_id_ssn: "98-7654321",
+    is_1099: false,
+    vat_number: "VAT-DET",
+    entity_use_code: "G",
+    external_id: "EXT-DET",
+    source: "api",
+  };
+
+  it("summary returns only core fields", () => {
+    const result = shapeCustomers([customer], "summary");
+    const c = result.customers[0];
+    expect(c.id).toBe(1);
+    expect(c.name).toBe("Detail Corp");
+    expect(c.totalRevenue).toBe(100000);
+    expect(c.status).toBe("active");
+    // Should NOT have normal-level fields
+    expect(c.firstName).toBeUndefined();
+    expect(c.addressStreet1).toBeUndefined();
+    expect(c.contacts).toBeUndefined();
+    expect(c.notes).toBeUndefined();
+    // Should NOT have full-level fields
+    expect(c.vatNumber).toBeUndefined();
+    expect(c.externalId).toBeUndefined();
+  });
+
+  it("normal (default) adds addresses, contacts, identity, notes, credit memo totals", () => {
+    const result = shapeCustomers([customer]);
+    const c = result.customers[0];
+    // Core still present
+    expect(c.totalRevenue).toBe(100000);
+    // Normal fields
+    expect(c.firstName).toBe("Alice");
+    expect(c.lastName).toBe("Wonder");
+    expect(c.dba).toBe("DetailCo");
+    expect(c.website).toBe("https://detail.example.com");
+    expect(c.notes).toBe("VIP customer");
+    expect(c.invoiceMessage).toBe("Thank you for your business");
+    expect(c.addressStreet1).toBe("100 First Ave");
+    expect(c.addressStreet2).toBe("Floor 5");
+    expect(c.city).toBe("Metropolis");
+    expect(c.state).toBe("NY");
+    expect(c.zipCode).toBe("10001");
+    expect(c.country).toBe("US");
+    expect(c.billingAddressStreet1).toBe("200 Billing Blvd");
+    expect(c.billingCity).toBe("Metropolis");
+    expect(c.billingAddressee).toBe("Accounts Payable");
+    expect(c.shippingAddressee).toBe("Warehouse");
+    expect(c.contacts).toHaveLength(1);
+    expect(c.contacts[0].name).toBe("Bob Smith");
+    expect(c.contacts[0].email).toBe("bob@detail.com");
+    expect(c.totalCreditMemos).toBe(2);
+    expect(c.creditMemoApplied).toBe(1000);
+    expect(c.creditMemoAvailable).toBe(500);
+    expect(c.pendingContracts).toBe(1);
+    // Should NOT have full-level fields
+    expect(c.vatNumber).toBeUndefined();
+    expect(c.externalId).toBeUndefined();
+    expect(c.businessIdSsn).toBeUndefined();
+  });
+
+  it("full adds tax/compliance and external IDs", () => {
+    const result = shapeCustomers([customer], "full");
+    const c = result.customers[0];
+    // Normal fields present
+    expect(c.firstName).toBe("Alice");
+    expect(c.contacts).toHaveLength(1);
+    // Full fields
+    expect(c.abbreviation).toBe("DET");
+    expect(c.businessIdSsn).toBe("98-7654321");
+    expect(c.is1099).toBe(false);
+    expect(c.vatNumber).toBe("VAT-DET");
+    expect(c.entityUseCode).toBe("G");
+    expect(c.externalId).toBe("EXT-DET");
+    expect(c.source).toBe("api");
+  });
+
+  it("aggregates are the same regardless of detail level", () => {
+    const summary = shapeCustomers([customer], "summary");
+    const normal = shapeCustomers([customer], "normal");
+    const full = shapeCustomers([customer], "full");
+    expect(summary.totalRevenue).toBe(normal.totalRevenue);
+    expect(normal.totalRevenue).toBe(full.totalRevenue);
+    expect(summary.totalMrr).toBe(normal.totalMrr);
+    expect(summary.totalOutstanding).toBe(normal.totalOutstanding);
+  });
+});
+
+describe("shapeInvoices detail levels", () => {
+  const invoice = {
+    id: 201,
+    invoiceNumber: "INV-201",
+    clientName: "Detail Corp",
+    status: "unpaid",
+    invoiceDate: "2026-03-01",
+    dueDate: "2026-03-31",
+    totalAmount: 15000,
+    amountPaid: 0,
+    amountDue: 15000,
+    pastDueDays: 14,
+    // Normal-level fields
+    contractName: "Project Detail",
+    contract: 42,
+    entityName: "US Entity",
+    departmentName: "Engineering",
+    tags: [{ name: "priority" }, { name: "q1" }],
+    paidDate: null,
+    sentDate: "2026-03-02",
+    lastSentAt: "2026-03-02T10:00:00Z",
+    periodStart: "2026-03-01",
+    periodEnd: "2026-03-31",
+    currency: "USD",
+    exchangeRate: 1.0,
+    paymentTermName: "Net 30",
+    purchaseOrderNumber: "PO-100",
+    messageOnInvoice: "Please remit payment",
+    billingAddress: "100 First Ave, Metropolis NY 10001",
+    billingAddressee: "Accounts Payable",
+    shippingAddress: "200 Warehouse Dr",
+    shippingAddressee: "Receiving",
+    // Full-level fields
+    lines: [
+      { description: "Consulting", quantity: 10, rate: 1200, amount: 12000, tax: 2400, departmentName: "Eng", tags: [{ name: "billable" }], productName: "Consulting Hours" },
+      { description: "Expenses", amount: 600, tax: 0 },
+    ],
+    payments: [
+      { amount: 5000, paymentDate: "2026-03-15", source: "ACH", paymentType: "electronic" },
+    ],
+    discount: 500,
+    refNumber: "REF-201",
+    emails: [{ sentAt: "2026-03-02", to: "client@detail.com" }],
+  };
+
+  it("summary returns only core fields", () => {
+    const result = shapeInvoices([invoice], "summary");
+    const inv = result.invoices[0];
+    expect(inv.id).toBe(201);
+    expect(inv.invoiceNumber).toBe("INV-201");
+    expect(inv.totalAmount).toBe(15000);
+    expect(inv.pastDueDays).toBe(14);
+    // Should NOT have normal/full fields
+    expect(inv.contractName).toBeUndefined();
+    expect(inv.entityName).toBeUndefined();
+    expect(inv.departmentName).toBeUndefined();
+    expect(inv.lines).toBeUndefined();
+    expect(inv.payments).toBeUndefined();
+  });
+
+  it("normal adds contract, dates, department, addresses", () => {
+    const result = shapeInvoices([invoice], "normal");
+    const inv = result.invoices[0];
+    expect(inv.contractName).toBe("Project Detail");
+    expect(inv.contractId).toBe(42);
+    expect(inv.entityName).toBe("US Entity");
+    expect(inv.departmentName).toBe("Engineering");
+    expect(inv.tags).toEqual(["priority", "q1"]);
+    expect(inv.sentDate).toBe("2026-03-02");
+    expect(inv.periodStart).toBe("2026-03-01");
+    expect(inv.currency).toBe("USD");
+    expect(inv.terms).toBe("Net 30");
+    expect(inv.purchaseOrderNumber).toBe("PO-100");
+    expect(inv.messageOnInvoice).toBe("Please remit payment");
+    expect(inv.billingAddress).toBe("100 First Ave, Metropolis NY 10001");
+    expect(inv.shippingAddressee).toBe("Receiving");
+    // Should NOT have full-level fields
+    expect(inv.lines).toBeUndefined();
+    expect(inv.payments).toBeUndefined();
+    expect(inv.discount).toBeUndefined();
+    expect(inv.emails).toBeUndefined();
+  });
+
+  it("full adds line items, payments, emails", () => {
+    const result = shapeInvoices([invoice], "full");
+    const inv = result.invoices[0];
+    // Normal fields present
+    expect(inv.contractName).toBe("Project Detail");
+    // Full fields
+    expect(inv.lines).toHaveLength(2);
+    expect(inv.lines[0].description).toBe("Consulting");
+    expect(inv.lines[0].quantity).toBe(10);
+    expect(inv.lines[0].rate).toBe(1200);
+    expect(inv.lines[0].amount).toBe(12000);
+    expect(inv.lines[0].tax).toBe(2400);
+    expect(inv.lines[0].departmentName).toBe("Eng");
+    expect(inv.lines[0].tags).toEqual(["billable"]);
+    expect(inv.lines[0].productName).toBe("Consulting Hours");
+    expect(inv.lines[1].quantity).toBeNull();
+    expect(inv.payments).toHaveLength(1);
+    expect(inv.payments[0].amount).toBe(5000);
+    expect(inv.payments[0].paymentDate).toBe("2026-03-15");
+    expect(inv.payments[0].source).toBe("ACH");
+    expect(inv.payments[0].paymentType).toBe("electronic");
+    expect(inv.discount).toBe(500);
+    expect(inv.refNumber).toBe("REF-201");
+    expect(inv.emails).toHaveLength(1);
+  });
+
+  it("aggregates are the same regardless of detail level", () => {
+    const summary = shapeInvoices([invoice], "summary");
+    const full = shapeInvoices([invoice], "full");
+    expect(summary.totalAmount).toBe(full.totalAmount);
+    expect(summary.totalNetAmount).toBe(full.totalNetAmount);
+    expect(summary.totalTaxAmount).toBe(full.totalTaxAmount);
+  });
+});
+
+describe("shapeBills detail levels", () => {
+  const bill = {
+    id: 301,
+    bill_number: "BILL-301",
+    bill_date: "2026-03-01",
+    due_date: "2026-03-31",
+    vendor_name: "Test Vendor",
+    entity_name: "US Entity",
+    status: "unpaid",
+    past_due_days: 5,
+    total_amount: 10000,
+    amount_due: 10000,
+    amount_paid: 0,
+    ap_account_name: "Accounts Payable",
+    message_on_bill: "Rush order",
+    // Normal-level fields
+    department_name: "Operations",
+    purchase_order_number: "PO-301",
+    currency: "USD",
+    exchange_rate: 1.0,
+    mailing_address: "456 Vendor Way, Anytown CA 90000",
+    bill_type: "standard",
+    // Full-level fields
+    lines: [
+      { account_name: "Office Supplies", account_number: "6100", department_name: "Ops", description: "Paper", amount: 5000, tax: 400, tags: [{ name: "office" }] },
+      { account_name: "Equipment", account_number: "1500", description: "Printer", amount: 5000, tax: 400 },
+    ],
+    payments: [
+      { amount: 3000, payment_date: "2026-03-15", source: "check" },
+    ],
+    tax_behavior: "exclusive",
+    attachments: [{ url: "https://example.com/receipt.pdf" }],
+    external_ramp_id: "RAMP-301",
+  };
+
+  it("summary returns only core fields", () => {
+    const result = shapeBills([bill], "summary");
+    const b = result.bills[0];
+    expect(b.id).toBe(301);
+    expect(b.billNumber).toBe("BILL-301");
+    expect(b.totalAmount).toBe(10000);
+    expect(b.lineCount).toBe(2);
+    // Should NOT have normal/full fields
+    expect(b.departmentName).toBeUndefined();
+    expect(b.purchaseOrderNumber).toBeUndefined();
+    expect(b.currency).toBeUndefined();
+    expect(b.lines).toBeUndefined();
+    expect(b.payments).toBeUndefined();
+  });
+
+  it("normal adds department, PO, currency, address", () => {
+    const result = shapeBills([bill], "normal");
+    const b = result.bills[0];
+    expect(b.departmentName).toBe("Operations");
+    expect(b.purchaseOrderNumber).toBe("PO-301");
+    expect(b.currency).toBe("USD");
+    expect(b.exchangeRate).toBe(1.0);
+    expect(b.mailingAddress).toBe("456 Vendor Way, Anytown CA 90000");
+    expect(b.billType).toBe("standard");
+    // Should NOT have full-level fields
+    expect(b.lines).toBeUndefined();
+    expect(b.payments).toBeUndefined();
+    expect(b.attachments).toBeUndefined();
+  });
+
+  it("full adds line items, payments, attachments", () => {
+    const result = shapeBills([bill], "full");
+    const b = result.bills[0];
+    // Normal fields present
+    expect(b.departmentName).toBe("Operations");
+    // Full fields
+    expect(b.lines).toHaveLength(2);
+    expect(b.lines[0].accountName).toBe("Office Supplies");
+    expect(b.lines[0].accountNumber).toBe("6100");
+    expect(b.lines[0].departmentName).toBe("Ops");
+    expect(b.lines[0].description).toBe("Paper");
+    expect(b.lines[0].amount).toBe(5000);
+    expect(b.lines[0].tax).toBe(400);
+    expect(b.lines[0].tags).toEqual(["office"]);
+    expect(b.payments).toHaveLength(1);
+    expect(b.payments[0].amount).toBe(3000);
+    expect(b.payments[0].paymentDate).toBe("2026-03-15");
+    expect(b.payments[0].source).toBe("check");
+    expect(b.taxBehavior).toBe("exclusive");
+    expect(b.attachments).toHaveLength(1);
+    expect(b.externalRampId).toBe("RAMP-301");
+  });
+});
+
+describe("analyzeContracts detail levels", () => {
+  const contract = {
+    id: 401,
+    name: "Enterprise Deal",
+    client_name: "Big Corp",
+    status: "active",
+    total_revenue: 500000,
+    total_billed: 200000,
+    total_unbilled: 300000,
+    start_date: "2025-01-01",
+    end_date: "2026-12-31",
+    // Normal-level fields
+    deal_name: "Enterprise Q1",
+    deal_id: 99,
+    crm_link: "https://crm.example.com/deal/99",
+    contract_link: "https://app.example.com/contract/401",
+    total_mrr: 20000,
+    total_paid: 180000,
+    total_outstanding: 20000,
+    total_deferred_revenue: 100000,
+    total_contract_value: 500000,
+    currency: "USD",
+    billing_frequency: "monthly",
+    purchase_order_number: "PO-401",
+    department_name: "Sales",
+    parent_department_name: "Revenue",
+    entity_name: "US Entity",
+    // Full-level fields
+    auto_renew: true,
+    auto_renew_duration: 12,
+    auto_renew_invoice: true,
+    is_evergreen: false,
+    effective_end_date: "2026-12-31",
+    working_end_date: "2026-12-31",
+    tags: [{ name: "enterprise" }, { name: "strategic" }],
+    entity_currency: "USD",
+    exchange_rate: 1.0,
+    attachments: [{ url: "https://example.com/contract.pdf" }],
+  };
+
+  it("summary returns only core fields", () => {
+    const result = analyzeContracts([contract], "summary");
+    const c = result.contracts[0];
+    expect(c.id).toBe(401);
+    expect(c.name).toBe("Enterprise Deal");
+    expect(c.clientName).toBe("Big Corp");
+    expect(c.totalRevenue).toBe(500000);
+    expect(c.recognized).toBe(200000);
+    expect(c.remaining).toBe(300000);
+    expect(c.percentRecognized).toBe(40);
+    expect(c.startDate).toBe("2025-01-01");
+    // Should NOT have normal/full fields
+    expect(c.dealName).toBeUndefined();
+    expect(c.totalMrr).toBeUndefined();
+    expect(c.autoRenew).toBeUndefined();
+    expect(c.tags).toBeUndefined();
+  });
+
+  it("normal adds deal info, financial detail, department", () => {
+    const result = analyzeContracts([contract], "normal");
+    const c = result.contracts[0];
+    expect(c.dealName).toBe("Enterprise Q1");
+    expect(c.dealId).toBe(99);
+    expect(c.crmLink).toBe("https://crm.example.com/deal/99");
+    expect(c.contractLink).toBe("https://app.example.com/contract/401");
+    expect(c.totalMrr).toBe(20000);
+    expect(c.totalPaid).toBe(180000);
+    expect(c.totalOutstanding).toBe(20000);
+    expect(c.totalDeferredRevenue).toBe(100000);
+    expect(c.totalContractValue).toBe(500000);
+    expect(c.currency).toBe("USD");
+    expect(c.billingFrequency).toBe("monthly");
+    expect(c.purchaseOrderNumber).toBe("PO-401");
+    expect(c.departmentName).toBe("Sales");
+    expect(c.parentDepartmentName).toBe("Revenue");
+    expect(c.entityName).toBe("US Entity");
+    // Should NOT have full-level fields
+    expect(c.autoRenew).toBeUndefined();
+    expect(c.tags).toBeUndefined();
+    expect(c.isEvergreen).toBeUndefined();
+  });
+
+  it("full adds auto-renew, evergreen, tags", () => {
+    const result = analyzeContracts([contract], "full");
+    const c = result.contracts[0];
+    // Normal fields present
+    expect(c.dealName).toBe("Enterprise Q1");
+    // Full fields
+    expect(c.autoRenew).toBe(true);
+    expect(c.autoRenewDuration).toBe(12);
+    expect(c.autoRenewInvoice).toBe(true);
+    expect(c.isEvergreen).toBe(false);
+    expect(c.effectiveEndDate).toBe("2026-12-31");
+    expect(c.workingEndDate).toBe("2026-12-31");
+    expect(c.tags).toEqual(["enterprise", "strategic"]);
+    expect(c.entityCurrency).toBe("USD");
+    expect(c.exchangeRate).toBe(1.0);
+    expect(c.attachments).toHaveLength(1);
+  });
+
+  it("aggregates are the same regardless of detail level", () => {
+    const summary = analyzeContracts([contract], "summary");
+    const full = analyzeContracts([contract], "full");
+    expect(summary.totalRevenue).toBe(full.totalRevenue);
+    expect(summary.totalRecognized).toBe(full.totalRecognized);
+    expect(summary.totalRemaining).toBe(full.totalRemaining);
+    expect(summary.percentRecognized).toBe(full.percentRecognized);
   });
 });

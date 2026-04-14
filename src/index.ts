@@ -37,7 +37,9 @@ import {
   shapeDepartments,
   shapeAccounts,
   shapeCreditMemos,
+  shapeVendors,
 } from "./helpers.js";
+import type { DetailLevel } from "./helpers.js";
 
 // Campfire uses apiKey auth with "Token <key>" format
 const config = new Configuration({
@@ -455,22 +457,25 @@ server.registerTool(
   "get_vendors",
   {
     description:
-      "Retrieve vendors with optional filtering by search query and type.",
+      "Retrieve vendors with optional filtering by search query and type. Use detail to control response size: summary (compact), normal (default, includes addresses/contacts), full (adds tax/compliance fields).",
     inputSchema: {
       q: z.string().optional().describe("Search query"),
       vendorType: z.string().optional().describe("Filter by vendor type"),
       limit: z.number().optional().describe("Max results (default: 100)"),
+      detail: z.enum(["summary", "normal", "full"]).optional().describe("Response detail level (default: normal)"),
     },
   },
-  async ({ q, vendorType, limit }) => {
+  async ({ q, vendorType, limit, detail }) => {
     try {
       const resp = await (companyApi as any).coaApiVendorList({
         q,
         vendorType,
         limit: limit ?? 100,
       });
+      const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
+      const result = shapeVendors(raw, (detail ?? "normal") as DetailLevel);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(resp.data, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       return errorResult("get_vendors", err);
@@ -543,21 +548,25 @@ server.registerTool(
   "get_contracts",
   {
     description:
-      "Retrieve revenue recognition contracts with enriched summary: recognized vs remaining revenue, per-contract totals and percentages.",
+      "Retrieve revenue recognition contracts with enriched summary: recognized vs remaining revenue, per-contract totals and percentages. Use detail to control response size: summary (compact), normal (default, includes deal/financial/department info), full (adds auto-renew, evergreen, tags).",
     inputSchema: {
       q: z.string().optional().describe("Search query"),
       clientId: z.number().optional().describe("Filter by client ID"),
       status: z.string().optional().describe("Filter by contract status"),
       limit: z.number().optional().describe("Max results (default: 50)"),
+      detail: z.enum(["summary", "normal", "full"]).optional().describe("Response detail level (default: normal)"),
     },
   },
-  async ({ q, clientId, status, limit }) => {
+  async ({ q, clientId, status, limit, detail }) => {
     try {
       const resp = await (revenueApi as any).listContracts({
+        q,
+        client: clientId,
+        status,
         limit: limit ?? 50,
       });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = analyzeContracts(raw);
+      const result = analyzeContracts(raw, (detail ?? "normal") as DetailLevel);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
@@ -571,14 +580,15 @@ server.registerTool(
   "get_customers",
   {
     description:
-      "Retrieve contract customers with financial summaries: total revenue, MRR, billed/unbilled/outstanding amounts, and contract counts per customer.",
+      "Retrieve contract customers with financial summaries: total revenue, MRR, billed/unbilled/outstanding amounts, and contract counts per customer. Use detail to control response size: summary (compact), normal (default, includes addresses/contacts/notes), full (adds tax/compliance fields).",
     inputSchema: {
       limit: z.number().optional().describe("Max results (default: 50)"),
       offset: z.number().optional().describe("Pagination offset"),
       includeDeleted: z.boolean().optional().describe("Include deleted customers"),
+      detail: z.enum(["summary", "normal", "full"]).optional().describe("Response detail level (default: normal)"),
     },
   },
-  async ({ limit, offset, includeDeleted }) => {
+  async ({ limit, offset, includeDeleted, detail }) => {
     try {
       const resp = await (revenueApi as any).rrApiV1CustomersList({
         includeDeleted,
@@ -586,7 +596,7 @@ server.registerTool(
         offset: offset ?? 0,
       });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = shapeCustomers(raw);
+      const result = shapeCustomers(raw, (detail ?? "normal") as DetailLevel);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
@@ -630,7 +640,7 @@ server.registerTool(
   "get_invoices",
   {
     description:
-      "Retrieve invoices with filtering by status, date range, client, and search query. Returns summary with totals and breakdown by status. Status values: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, sent, or aging buckets (1_30, 31_60, 61_90, 91_120, over_120).",
+      "Retrieve invoices with filtering by status, date range, client, and search query. Returns summary with totals and breakdown by status. Use detail to control response size: summary (compact), normal (default, includes contract/dates/addresses), full (adds line items, payments, emails). Status values: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, sent, or aging buckets (1_30, 31_60, 61_90, 91_120, over_120).",
     inputSchema: {
       status: z.string().optional().describe("Filter by status: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, 1_30, 31_60, 61_90, 91_120, over_120"),
       startDate: z.string().optional().describe("Filter invoices on or after this date (YYYY-MM-DD)"),
@@ -639,9 +649,10 @@ server.registerTool(
       q: z.string().optional().describe("Search invoice numbers, addresses, client names"),
       limit: z.number().optional().describe("Max results (default: 50)"),
       offset: z.number().optional().describe("Pagination offset"),
+      detail: z.enum(["summary", "normal", "full"]).optional().describe("Response detail level (default: normal)"),
     },
   },
-  async ({ status, startDate, endDate, clientId, q, limit, offset }) => {
+  async ({ status, startDate, endDate, clientId, q, limit, offset, detail }) => {
     try {
       const resp = await (arApi as any).coaApiV1InvoiceList({
         client: clientId,
@@ -653,7 +664,7 @@ server.registerTool(
         status,
       });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = shapeInvoices(raw);
+      const result = shapeInvoices(raw, (detail ?? "normal") as DetailLevel);
       // Strip null/undefined values to minimize token usage
       const compact = JSON.stringify(result, (_k, v) => v ?? undefined, 2);
       return {
@@ -793,7 +804,7 @@ server.registerTool(
   "get_bills",
   {
     description:
-      "Retrieve bills filtered by status, vendor, date range, and search query. Returns summary with totals by status and vendor. Status values: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120.",
+      "Retrieve bills filtered by status, vendor, date range, and search query. Returns summary with totals by status and vendor. Use detail to control response size: summary (compact), normal (default, includes department/PO/currency/address), full (adds line items, payments, attachments). Status values: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120.",
     inputSchema: {
       status: z.string().optional().describe("Filter by status: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120"),
       vendorId: z.number().optional().describe("Filter by vendor ID"),
@@ -803,9 +814,10 @@ server.registerTool(
       q: z.string().optional().describe("Search bill number, vendor name, etc."),
       limit: z.number().optional().describe("Max results (default: 50)"),
       offset: z.number().optional().describe("Pagination offset"),
+      detail: z.enum(["summary", "normal", "full"]).optional().describe("Response detail level (default: normal)"),
     },
   },
-  async ({ status, vendorId, entityId, startDate, endDate, q, limit, offset }) => {
+  async ({ status, vendorId, entityId, startDate, endDate, q, limit, offset, detail }) => {
     try {
       const resp = await (apApi as any).coaApiV1BillRetrieve({
         endDate,
@@ -818,7 +830,7 @@ server.registerTool(
         vendor: vendorId,
       });
       const raw = Array.isArray(resp.data) ? resp.data : resp.data?.results || [];
-      const result = shapeBills(raw);
+      const result = shapeBills(raw, (detail ?? "normal") as DetailLevel);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
