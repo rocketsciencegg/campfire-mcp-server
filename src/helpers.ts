@@ -1211,6 +1211,391 @@ export function shapeDepartments(departments: any[]): DepartmentSummary {
   };
 }
 
+// --- Chart transaction (single line) shaping ---
+
+export function shapeChartTransaction(t: any) {
+  return {
+    id: t.id,
+    journal: t.journal ?? null,
+    journalOrder: t.journal_order ?? null,
+    transactionId: t.transaction_id ?? null,
+    postedAt: t.posted_at,
+    accountName: t.account_name,
+    accountNumber: t.account_number,
+    accountType: t.account_type,
+    accountSubtype: t.account_subtype,
+    vendorName: t.vendor_name,
+    departmentName: t.department_name,
+    entityName: t.entity_name,
+    journalMemo: t.journal_memo,
+    journalType: t.journal_type_name ?? t.journal_type,
+    debitAmount: t.debit_amount != null ? Number(t.debit_amount) : null,
+    creditAmount: t.credit_amount != null ? Number(t.credit_amount) : null,
+    amount: Number(t.amount ?? 0),
+    currency: t.currency,
+    exchangeRate: t.exchange_rate,
+    merchantName: t.merchant_name,
+    bankDescription: t.bank_description,
+    note: t.note,
+    invoiceId: t.invoice_id || null,
+    invoiceNumber: t.invoice_number || null,
+    billId: t.bill_id || null,
+    billNumber: t.bill_number || null,
+    tags: Array.isArray(t.tags) ? t.tags.map((tag: any) => tag.name ?? tag) : [],
+    needsReview: t.needs_review ?? false,
+    hasMatches: t.has_matches ?? false,
+    suggestedAccountName: t.suggested_account_name,
+    suggestedAccountNumber: t.suggested_account_number,
+    balanceAfterTransaction: t.balance_after_transaction,
+    createdAt: t.created_at,
+    lastModifiedAt: t.last_modified_at,
+  };
+}
+
+// --- Journal entry shaping ---
+
+export function shapeJournalEntry(j: any) {
+  const transactions = Array.isArray(j.transactions)
+    ? j.transactions.map((t: any) => ({
+        id: t.id,
+        accountName: t.account_name,
+        accountNumber: t.account_number,
+        accountType: t.account_type,
+        vendorName: t.vendor_name,
+        departmentName: t.department_name,
+        debitAmount: t.debit_amount != null ? Number(t.debit_amount) : null,
+        creditAmount: t.credit_amount != null ? Number(t.credit_amount) : null,
+        currency: t.currency,
+        journalMemo: t.journal_memo,
+        note: t.note,
+        postedAt: t.posted_at,
+        invoiceId: t.invoice_id || null,
+        invoiceNumber: t.invoice_number || null,
+        billId: t.bill_id || null,
+        billNumber: t.bill_number || null,
+      }))
+    : [];
+
+  return {
+    id: j.id,
+    order: j.order ?? null,
+    date: j.date ?? null,
+    memo: j.memo ?? null,
+    type: j.type ?? null,
+    currency: j.currency ?? null,
+    exchangeRate: j.exchange_rate ?? null,
+    entityName: j.entity_name ?? null,
+    refNumber: j.ref_number ?? null,
+    source: j.source ?? null,
+    createdAt: j.created_at,
+    lastModifiedAt: j.last_modified_at,
+    transactions,
+  };
+}
+
+// --- Invoice (single-record) shaping ---
+
+export function shapeInvoiceDetail(i: any) {
+  const lines = Array.isArray(i.lines)
+    ? i.lines.map((l: any) => ({
+        id: l.id,
+        productName: l.product_name ?? null,
+        description: l.description ?? null,
+        departmentName: l.department_name ?? null,
+        quantity: l.quantity != null ? Number(l.quantity) : null,
+        rate: l.rate != null ? Number(l.rate) : null,
+        amount: l.amount != null ? Number(l.amount) : null,
+        tax: l.tax != null ? Number(l.tax) : null,
+        discount: l.discount != null ? Number(l.discount) : null,
+        currency: l.currency ?? null,
+        productId: l.product ?? null,
+        departmentId: l.department ?? null,
+      }))
+    : [];
+  return {
+    id: i.id, // canonical numeric id (URL id; used in FKs like invoiceId)
+    invoiceNumber: i.invoice_number ?? null, // printed display string (e.g. "INV-0042")
+    status: i.status ?? null,
+    paymentStatus: i.payment_status ?? null,
+    clientName: i.client_name ?? null,
+    clientEmail: i.client_email ?? null,
+    entityName: i.entity_name ?? null,
+    entityCurrency: i.entity_currency ?? null,
+    contractName: i.contract_name ?? null,
+    invoiceDate: i.invoice_date ?? null,
+    dueDate: i.due_date ?? null,
+    sentDate: i.sent_date ?? null,
+    paidDate: i.paid_date ?? null,
+    voidedDate: i.voided_date ?? null,
+    periodStart: i.period_start ?? null,
+    periodEnd: i.period_end ?? null,
+    totalAmount: i.total_amount != null ? Number(i.total_amount) : null,
+    amountPaid: i.amount_paid != null ? Number(i.amount_paid) : null,
+    amountDue: i.amount_due != null ? Number(i.amount_due) : null,
+    currency: i.currency ?? null,
+    exchangeRate: i.exchange_rate ?? null,
+    paymentTermName: i.payment_term_name ?? null,
+    messageOnInvoice: i.message_on_invoice ?? null,
+    refNumber: i.ref_number ?? null,
+    purchaseOrderNumber: i.purchase_order_number ?? null,
+    // Foreign keys — pass to the named fetch tool:
+    clientId: i.client ?? null, // → get_customer
+    contractId: i.contract ?? null, // → get_contract
+    entityId: i.entity ?? null,
+    journalEntryId: i.journal_entry ?? null, // → get_journal_entry
+    arAccountId: i.ar_account ?? null,
+    lines,
+    createdAt: i.created_at,
+  };
+}
+
+// --- Bill (single-record) shaping ---
+
+export function shapeBillDetail(b: any) {
+  const lines = Array.isArray(b.lines)
+    ? b.lines.map((l: any) => ({
+        id: l.id,
+        accountNumber: l.account_number ?? null,
+        accountName: l.account_name ?? null,
+        description: l.description ?? null,
+        departmentName: l.department_name ?? null,
+        amount: l.amount != null ? Number(l.amount) : null,
+        tax: l.tax != null ? Number(l.tax) : null,
+        currency: l.currency ?? null,
+        accountId: l.account ?? null,
+        departmentId: l.department ?? null,
+      }))
+    : [];
+  return {
+    id: b.id,
+    billNumber: b.bill_number ?? null, // printed display string (often "INV-…" — same prefix as invoices!)
+    status: b.status ?? null,
+    paymentStatus: b.payment_status ?? null,
+    vendorName: b.vendor_name ?? null,
+    entityName: b.entity_name ?? null,
+    entityCurrency: b.entity_currency ?? null,
+    apAccountName: b.ap_account_name ?? null,
+    billDate: b.bill_date ?? null,
+    dueDate: b.due_date ?? null,
+    paidDate: b.paid_date ?? null,
+    voidedDate: b.voided_date ?? null,
+    totalAmount: b.total_amount != null ? Number(b.total_amount) : null,
+    amountPaid: b.amount_paid != null ? Number(b.amount_paid) : null,
+    amountDue: b.amount_due != null ? Number(b.amount_due) : null,
+    currency: b.currency ?? null,
+    exchangeRate: b.exchange_rate ?? null,
+    messageOnBill: b.message_on_bill ?? null,
+    source: b.source ?? null,
+    externalRampId: b.external_ramp_id ?? null,
+    // Foreign keys
+    vendorId: b.vendor ?? null,
+    entityId: b.entity ?? null,
+    journalEntryId: b.journal_entry ?? null,
+    apAccountId: b.ap_account ?? null,
+    lines,
+    createdAt: b.created_at,
+  };
+}
+
+// --- Credit memo (single-record) shaping ---
+
+export function shapeCreditMemoDetail(cm: any) {
+  const lines = Array.isArray(cm.lines)
+    ? cm.lines.map((l: any) => ({
+        id: l.id,
+        accountNumber: l.account_number ?? null,
+        accountName: l.account_name ?? null,
+        productName: l.product_name ?? null,
+        description: l.description ?? null,
+        departmentName: l.department_name ?? null,
+        amount: l.amount != null ? Number(l.amount) : null,
+        tax: l.tax != null ? Number(l.tax) : null,
+        accountId: l.account ?? null,
+        departmentId: l.department ?? null,
+      }))
+    : [];
+  return {
+    id: cm.id,
+    creditMemoNumber: cm.credit_memo_number ?? null, // printed display string (e.g. "CN-105")
+    applicationStatus: cm.application_status ?? null,
+    clientName: cm.client_name ?? null,
+    clientEmail: cm.client_email ?? null,
+    contractName: cm.contract_name ?? null,
+    entityName: cm.entity_name ?? null,
+    entityCurrency: cm.entity_currency ?? null,
+    creditAccountName: cm.credit_account_name ?? null,
+    creditMemoDate: cm.credit_memo_date ?? null,
+    appliedDate: cm.applied_date ?? null,
+    voidedDate: cm.voided_date ?? null,
+    totalAmount: cm.total_amount != null ? Number(cm.total_amount) : null,
+    amountUsed: cm.amount_used != null ? Number(cm.amount_used) : null,
+    amountRemaining: cm.amount_remaining != null ? Number(cm.amount_remaining) : null,
+    currency: cm.currency ?? null,
+    exchangeRate: cm.exchange_rate ?? null,
+    messageOnCreditMemo: cm.message_on_credit_memo ?? null,
+    refNumber: cm.ref_number ?? null,
+    // Foreign keys
+    clientId: cm.client ?? null,
+    contractId: cm.contract ?? null,
+    entityId: cm.entity ?? null,
+    journalEntryId: cm.journal_entry ?? null,
+    creditAccountId: cm.credit_account ?? null,
+    lines,
+    createdAt: cm.created_at,
+  };
+}
+
+// --- Debit memo (single-record) shaping ---
+
+export function shapeDebitMemoDetail(dm: any) {
+  const lines = Array.isArray(dm.lines)
+    ? dm.lines.map((l: any) => ({
+        id: l.id,
+        accountNumber: l.account_number ?? null,
+        accountName: l.account_name ?? null,
+        description: l.description ?? null,
+        departmentName: l.department_name ?? null,
+        amount: l.amount != null ? Number(l.amount) : null,
+        tax: l.tax != null ? Number(l.tax) : null,
+        accountId: l.account ?? null,
+        departmentId: l.department ?? null,
+      }))
+    : [];
+  return {
+    id: dm.id,
+    debitMemoNumber: dm.debit_memo_number ?? null, // printed display string
+    applicationStatus: dm.application_status ?? null,
+    vendorName: dm.vendor_name ?? null,
+    vendorEmail: dm.vendor_email ?? null,
+    entityName: dm.entity_name ?? null,
+    entityCurrency: dm.entity_currency ?? null,
+    debitAccountName: dm.debit_account_name ?? null,
+    debitMemoDate: dm.debit_memo_date ?? null,
+    appliedDate: dm.applied_date ?? null,
+    voidedDate: dm.voided_date ?? null,
+    totalAmount: dm.total_amount != null ? Number(dm.total_amount) : null,
+    amountUsed: dm.amount_used != null ? Number(dm.amount_used) : null,
+    amountRemaining: dm.amount_remaining != null ? Number(dm.amount_remaining) : null,
+    currency: dm.currency ?? null,
+    exchangeRate: dm.exchange_rate ?? null,
+    messageOnDebitMemo: dm.message_on_debit_memo ?? null,
+    refNumber: dm.ref_number ?? null,
+    // Foreign keys
+    vendorId: dm.vendor ?? null,
+    entityId: dm.entity ?? null,
+    journalEntryId: dm.journal_entry ?? null,
+    debitAccountId: dm.debit_account ?? null,
+    lines,
+    createdAt: dm.created_at,
+  };
+}
+
+// --- Contract (single-record) shaping ---
+
+export function shapeContractDetail(c: any) {
+  return {
+    id: c.id,
+    // Contracts have no printed number of their own — these two are CRM refs
+    dealName: c.deal_name ?? null,
+    dealId: c.deal_id ?? null, // string — from external CRM (e.g. HubSpot)
+    purchaseOrderNumber: c.purchase_order_number ?? null,
+    customFieldStatementOfWorkNumber: c.custom_field_statement_of_work_number ?? null,
+    status: c.status ?? null,
+    billingFrequency: c.billing_frequency ?? null,
+    isEvergreen: c.is_evergreen ?? false,
+    clientName: c.client_name ?? null,
+    entityName: c.entity_name ?? null,
+    entityCurrency: c.entity_currency ?? null,
+    departmentName: c.department_name ?? null,
+    consultant: c.consultant ?? null,
+    closedDate: c.closed_date ?? null,
+    contractStartDate: c.contract_start_date ?? null,
+    contractEndDate: c.contract_end_date ?? null,
+    effectiveEndDate: c.effective_end_date ?? null,
+    workingEndDate: c.working_end_date ?? null,
+    totalContractValue: c.total_contract_value != null ? Number(c.total_contract_value) : null,
+    totalRevenue: c.total_revenue != null ? Number(c.total_revenue) : null,
+    totalMrr: c.total_mrr != null ? Number(c.total_mrr) : null,
+    totalDeferredRevenue: c.total_deferred_revenue != null ? Number(c.total_deferred_revenue) : null,
+    totalBilled: c.total_billed != null ? Number(c.total_billed) : null,
+    totalPaid: c.total_paid != null ? Number(c.total_paid) : null,
+    totalUnbilled: c.total_unbilled != null ? Number(c.total_unbilled) : null,
+    totalOutstanding: c.total_outstanding != null ? Number(c.total_outstanding) : null,
+    currency: c.currency ?? null,
+    exchangeRate: c.exchange_rate ?? null,
+    autoRenew: c.auto_renew ?? false,
+    autoRenewDuration: c.auto_renew_duration ?? null,
+    autoSendInvoices: c.auto_send_invoices ?? false,
+    hasInvoices: c.has_invoices ?? false,
+    hasJournalEntries: c.has_journal_entries ?? false,
+    hasCreditMemos: c.has_credit_memos ?? false,
+    source: c.source ?? null,
+    crmLink: c.crm_link ?? null,
+    tags: Array.isArray(c.tags) ? c.tags.map((t: any) => t.name ?? t) : [],
+    // Foreign keys
+    clientId: c.client ?? null, // → get_customer
+    entityId: c.entity ?? null,
+    departmentId: c.department ?? null,
+    createdAt: c.created_at,
+  };
+}
+
+// --- Customer (single-record) shaping ---
+
+export function shapeCustomerDetail(c: any) {
+  return {
+    id: c.id,
+    // Customers have no printed number — identity is `name`
+    name: c.name ?? null,
+    dba: c.dba ?? null,
+    companyName: c.company_name ?? null,
+    email: c.email ?? null,
+    phoneNumber: c.phone_number ?? null,
+    website: c.website ?? null,
+    status: c.status ?? null,
+    vendorType: c.vendor_type ?? null,
+    isDeleted: c.is_deleted ?? false,
+    is1099: c.is_1099 ?? false,
+    vatNumber: c.vat_number ?? null,
+    externalId: c.external_id ?? null,
+    terms: c.terms ?? null,
+    invoiceMessage: c.invoice_message ?? null,
+    // Address
+    addressStreet1: c.address_street_1 ?? null,
+    addressStreet2: c.address_street_2 ?? null,
+    city: c.city ?? null,
+    state: c.state ?? null,
+    zipCode: c.zip_code ?? null,
+    country: c.country ?? null,
+    billingAddressStreet1: c.billing_address_street_1 ?? null,
+    billingAddressStreet2: c.billing_address_street_2 ?? null,
+    billingCity: c.billing_city ?? null,
+    billingState: c.billing_state ?? null,
+    billingZipCode: c.billing_zip_code ?? null,
+    billingCountry: c.billing_country ?? null,
+    // Aggregates
+    activeContracts: c.active_contracts ?? 0,
+    completedContracts: c.completed_contracts ?? 0,
+    totalContracts: c.total_contracts ?? 0,
+    totalRevenue: c.total_revenue != null ? Number(c.total_revenue) : 0,
+    totalBilled: c.total_billed != null ? Number(c.total_billed) : 0,
+    totalPaid: c.total_paid != null ? Number(c.total_paid) : 0,
+    totalOutstanding: c.total_outstanding != null ? Number(c.total_outstanding) : 0,
+    totalDeferredRevenue: c.total_deferred_revenue != null ? Number(c.total_deferred_revenue) : 0,
+    totalMrr: c.total_mrr != null ? Number(c.total_mrr) : 0,
+    creditMemoAvailable: c.credit_memo_available != null ? Number(c.credit_memo_available) : 0,
+    // External integrations
+    stripeCustomerId: c.stripe_customer_id ?? null,
+    anrokCustomerId: c.anrok_customer_id ?? null,
+    billVendorId: c.bill_vendor_id ?? null,
+    // Foreign keys
+    parentId: c.parent ?? null, // → get_customer (parent customer)
+    paymentTermId: c.payment_term ?? null,
+    contacts: Array.isArray(c.contacts) ? c.contacts : [],
+    createdAt: c.created_at,
+  };
+}
+
 // --- Utility ---
 
 function round(n: number, decimals = 2): number {

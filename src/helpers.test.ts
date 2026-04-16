@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   getMonthRange,
   getCurrentYTDRange,
@@ -19,7 +22,27 @@ import {
   shapeAccounts,
   shapeCreditMemos,
   shapeVendors,
+  shapeChartTransaction,
+  shapeJournalEntry,
+  shapeInvoiceDetail,
+  shapeBillDetail,
+  shapeCreditMemoDetail,
+  shapeDebitMemoDetail,
+  shapeContractDetail,
+  shapeCustomerDetail,
 } from "./helpers.js";
+
+const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__");
+const loadFixture = (name: string) =>
+  JSON.parse(readFileSync(join(fixturesDir, name), "utf8"));
+const chartTransactionFixture = loadFixture("chart-transaction.json");
+const journalEntryFixture = loadFixture("journal-entry.json");
+const invoiceFixture = loadFixture("invoice.json");
+const billFixture = loadFixture("bill.json");
+const creditMemoFixture = loadFixture("credit-memo.json");
+const debitMemoFixture = loadFixture("debit-memo.json");
+const contractFixture = loadFixture("contract.json");
+const customerFixture = loadFixture("customer.json");
 
 // --- Date helpers ---
 
@@ -2491,5 +2514,247 @@ describe("analyzeContracts detail levels", () => {
     expect(summary.totalRecognized).toBe(full.totalRecognized);
     expect(summary.totalRemaining).toBe(full.totalRemaining);
     expect(summary.percentRecognized).toBe(full.percentRecognized);
+  });
+});
+
+// --- Chart transaction / journal entry shaping (dual-ID support) ---
+//
+// Fixtures were captured from the live Campfire API and then scrubbed: all
+// identifying values (IDs, names, amounts, UUIDs) are fabricated, but the
+// object *shape* (fields, nullability, nested arrays) mirrors what the API
+// actually returns. See src/__fixtures__/.
+
+describe("shapeChartTransaction", () => {
+  it("exposes both IDs: chart-line id, parent journal id, and journal order", () => {
+    const out = shapeChartTransaction(chartTransactionFixture);
+    expect(out.id).toBe(1001); // chart-line ID
+    expect(out.journal).toBe(9001); // parent journal entry ID (matches URL ID)
+    expect(out.journalOrder).toBe("0099999"); // user-visible "Transaction #…" number
+    expect(out.transactionId).toBe("00000000-0000-0000-0000-000000001001");
+  });
+
+  it("preserves debit/credit asymmetry from a real response", () => {
+    const out = shapeChartTransaction(chartTransactionFixture);
+    expect(out.debitAmount).toBe(100);
+    expect(out.creditAmount).toBeNull();
+  });
+
+  it("prefers journal_type_name over journal_type for display", () => {
+    const out = shapeChartTransaction(chartTransactionFixture);
+    expect(out.journalType).toBe("Deposit");
+  });
+
+  it("tolerates missing ID fields without throwing", () => {
+    // An older/partial record missing the three dual-ID fields entirely
+    const partial = { ...chartTransactionFixture } as any;
+    delete partial.journal;
+    delete partial.journal_order;
+    delete partial.transaction_id;
+    const out = shapeChartTransaction(partial);
+    expect(out.journal).toBeNull();
+    expect(out.journalOrder).toBeNull();
+    expect(out.transactionId).toBeNull();
+  });
+
+  it("handles empty tags array", () => {
+    const out = shapeChartTransaction(chartTransactionFixture);
+    expect(out.tags).toEqual([]);
+  });
+});
+
+describe("shapeJournalEntry", () => {
+  it("exposes the journal's URL ID and user-visible order", () => {
+    const out = shapeJournalEntry(journalEntryFixture);
+    expect(out.id).toBe(9001); // matches the fixture's top-level id (URL ID)
+    expect(out.order).toBe("0099999"); // user-visible "Transaction #0099999"
+  });
+
+  it("nests shaped chart transactions with consistent parent IDs", () => {
+    const out = shapeJournalEntry(journalEntryFixture);
+    expect(out.transactions).toHaveLength(2);
+    for (const t of out.transactions) {
+      expect(t.id).toBeGreaterThan(0);
+      expect(typeof t.accountName).toBe("string");
+    }
+  });
+
+  it("journal legs balance: total debits equal total credits", () => {
+    const out = shapeJournalEntry(journalEntryFixture);
+    const debits = out.transactions.reduce((s: number, t: any) => s + (t.debitAmount ?? 0), 0);
+    const credits = out.transactions.reduce((s: number, t: any) => s + (t.creditAmount ?? 0), 0);
+    expect(debits).toBe(credits);
+  });
+
+  it("returns empty transactions array when field is missing", () => {
+    const { transactions, ...withoutTxns } = journalEntryFixture as any;
+    const out = shapeJournalEntry(withoutTxns);
+    expect(out.transactions).toEqual([]);
+  });
+});
+
+describe("ID relationship between the two fixtures", () => {
+  // This is the invariant the integration tests also verify end-to-end:
+  // a chart transaction's `journal` field should equal its parent journal
+  // entry's `id`, and `journal_order` should equal the parent's `order`.
+  it("chart transaction's journal id matches journal entry's id", () => {
+    expect((chartTransactionFixture as any).journal).toBe(
+      (journalEntryFixture as any).id
+    );
+  });
+
+  it("chart transaction's journal_order matches journal entry's order", () => {
+    expect((chartTransactionFixture as any).journal_order).toBe(
+      (journalEntryFixture as any).order
+    );
+  });
+});
+
+// --- Single-record fetch-by-id shapers (invoice/bill/credit-memo/debit-memo/contract/customer) ---
+//
+// These confirm the ID vocabulary is consistently exposed:
+//   - canonical numeric `id` (URL id, FK value)
+//   - printed display number with the entity-specific field name
+//   - foreign-key ids named consistently (camelCase `<entity>Id`)
+
+describe("shapeInvoiceDetail", () => {
+  const out = shapeInvoiceDetail(invoiceFixture);
+  it("exposes canonical id and invoiceNumber separately", () => {
+    expect(out.id).toBe(2001);
+    expect(out.invoiceNumber).toBe("INV-TEST-0001");
+  });
+  it("exposes foreign-key IDs for follow-up fetches", () => {
+    expect(out.clientId).toBe(802);
+    expect(out.contractId).toBe(1001);
+    expect(out.journalEntryId).toBe(9501);
+  });
+  it("coerces amount fields to numbers", () => {
+    expect(typeof out.totalAmount).toBe("number");
+    expect(out.totalAmount).toBe(10000);
+    expect(out.amountDue).toBe(10000);
+  });
+  it("shapes line items with their own ids and FKs", () => {
+    expect(out.lines).toHaveLength(2);
+    expect(out.lines[0].id).toBe(3001);
+    expect(out.lines[0].productId).toBe(501);
+    expect(out.lines[0].departmentId).toBe(4001);
+  });
+  it("tolerates missing display number", () => {
+    const { invoice_number, ...partial } = invoiceFixture as any;
+    const shaped = shapeInvoiceDetail(partial);
+    expect(shaped.invoiceNumber).toBeNull();
+    expect(shaped.id).toBe(2001);
+  });
+});
+
+describe("shapeBillDetail", () => {
+  const out = shapeBillDetail(billFixture);
+  it("exposes canonical id and billNumber — bill number often starts with INV-…", () => {
+    expect(out.id).toBe(2501);
+    expect(out.billNumber).toBe("INV-TEST-0002");
+    // Intentionally starts with INV-: this is the collision hazard the server instructions warn about
+    expect(out.billNumber.startsWith("INV-")).toBe(true);
+  });
+  it("exposes vendor/entity/journal/apAccount foreign keys", () => {
+    expect(out.vendorId).toBe(770);
+    expect(out.entityId).toBe(101);
+    expect(out.journalEntryId).toBe(9502);
+    expect(out.apAccountId).toBe(602);
+  });
+  it("shapes line items with account and department FKs", () => {
+    expect(out.lines).toHaveLength(2);
+    expect(out.lines[0].accountId).toBe(550);
+    expect(out.lines[0].departmentId).toBe(4002);
+  });
+});
+
+describe("shapeCreditMemoDetail", () => {
+  const out = shapeCreditMemoDetail(creditMemoFixture);
+  it("exposes canonical id and creditMemoNumber", () => {
+    expect(out.id).toBe(3001);
+    expect(out.creditMemoNumber).toBe("CN-TEST-0001");
+  });
+  it("exposes client/contract/entity foreign keys", () => {
+    expect(out.clientId).toBe(802);
+    expect(out.contractId).toBe(1002);
+    expect(out.entityId).toBe(101);
+    expect(out.journalEntryId).toBe(9503);
+  });
+  it("coerces amount fields to numbers", () => {
+    expect(out.totalAmount).toBe(5000);
+    expect(out.amountRemaining).toBe(5000);
+    expect(out.amountUsed).toBe(0);
+  });
+});
+
+describe("shapeDebitMemoDetail", () => {
+  const out = shapeDebitMemoDetail(debitMemoFixture);
+  it("exposes canonical id and debitMemoNumber", () => {
+    expect(out.id).toBe(3501);
+    expect(out.debitMemoNumber).toBe("DN-TEST-0001");
+  });
+  it("exposes vendor/debitAccount/journal foreign keys", () => {
+    expect(out.vendorId).toBe(770);
+    expect(out.debitAccountId).toBe(602);
+    expect(out.journalEntryId).toBe(9504);
+  });
+});
+
+describe("shapeContractDetail", () => {
+  const out = shapeContractDetail(contractFixture);
+  it("exposes canonical id (contracts have no printed Campfire number)", () => {
+    expect(out.id).toBe(1001);
+  });
+  it("separates Campfire id from external CRM deal id", () => {
+    // `dealId` is a string from an external CRM (HubSpot), NOT a Campfire id.
+    // Callers should not pass it to get_contract.
+    expect(out.dealId).toBe("TESTDEAL0001");
+    expect(typeof out.dealId).toBe("string");
+    expect(typeof out.id).toBe("number");
+  });
+  it("exposes client/entity/department foreign keys", () => {
+    expect(out.clientId).toBe(802);
+    expect(out.entityId).toBe(101);
+    expect(out.departmentId).toBe(4001);
+  });
+  it("shapes tag array to names", () => {
+    expect(out.tags).toEqual(["monthly_flat"]);
+  });
+});
+
+describe("shapeCustomerDetail", () => {
+  const out = shapeCustomerDetail(customerFixture);
+  it("exposes canonical id and name (customers have no printed number)", () => {
+    expect(out.id).toBe(802);
+    expect(out.name).toBe("Delta Co");
+  });
+  it("exposes aggregate totals as numbers", () => {
+    expect(typeof out.totalRevenue).toBe("number");
+    expect(typeof out.totalOutstanding).toBe("number");
+    expect(out.totalContracts).toBe(0);
+  });
+  it("returns empty contacts array when source is empty", () => {
+    expect(out.contacts).toEqual([]);
+  });
+});
+
+// The FK-follow contract: an invoice's clientId is the same kind of id a customer fixture carries.
+// This is the "follow the FK" flow an LLM should be able to do without guessing.
+describe("Cross-entity ID follow flow", () => {
+  it("invoice's clientId can be fed back into get_customer (same numeric id space)", () => {
+    const inv = shapeInvoiceDetail(invoiceFixture);
+    const cust = shapeCustomerDetail(customerFixture);
+    expect(inv.clientId).toBe(cust.id);
+  });
+
+  it("invoice's contractId can be fed back into get_contract", () => {
+    const inv = shapeInvoiceDetail(invoiceFixture);
+    const ctr = shapeContractDetail(contractFixture);
+    expect(inv.contractId).toBe(ctr.id);
+  });
+
+  it("contract's clientId can be fed back into get_customer", () => {
+    const ctr = shapeContractDetail(contractFixture);
+    const cust = shapeCustomerDetail(customerFixture);
+    expect(ctr.clientId).toBe(cust.id);
   });
 });

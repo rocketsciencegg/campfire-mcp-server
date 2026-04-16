@@ -38,6 +38,14 @@ import {
   shapeAccounts,
   shapeCreditMemos,
   shapeVendors,
+  shapeChartTransaction,
+  shapeJournalEntry,
+  shapeInvoiceDetail,
+  shapeBillDetail,
+  shapeCreditMemoDetail,
+  shapeDebitMemoDetail,
+  shapeContractDetail,
+  shapeCustomerDetail,
 } from "./helpers.js";
 import type { DetailLevel } from "./helpers.js";
 
@@ -65,10 +73,18 @@ function errorResult(toolName: string, err: unknown) {
 
 // --- NEW TOOLS ---
 
+const SERVER_INSTRUCTIONS = `Campfire identifier rules (applies to every tool):
+
+- Every entity has ONE canonical numeric \`id\` — the integer in Campfire URLs (e.g. \`/v2/accounting/invoices/{id}\`) and the value stored in foreign-key fields returned by other tools (\`invoiceId\`, \`billId\`, \`journal\`, \`contractId\`, \`clientId\`, \`vendorId\`, \`accountId\`, etc.). Every by-id fetch tool (\`get_invoice\`, \`get_bill\`, \`get_journal_entry\`, …) accepts only this numeric id.
+- Some entities ALSO return a printed display string — \`invoiceNumber\` (e.g. \`INV-0042\`), \`billNumber\` (also often \`INV-…\`), \`creditMemoNumber\` (e.g. \`CN-105\`), \`debitMemoNumber\`, a journal entry's \`order\` (shown in the UI as \`Transaction #0099999\`), or a chart transaction's UUID \`transactionId\`. These are NOT API ids. To look up an entity by a printed display string, call the corresponding LIST tool with \`q="…"\`, never a fetch-by-id tool.
+- Collision warning: invoices and bills both print numbers like \`INV-…\`. The URL path (\`/invoices/…\` vs \`/bills/…\`) is the only reliable disambiguator.`;
+
 function createServer() {
 const server = new McpServer({
   name: "campfire-mcp-server",
   version: "2.4.0",
+}, {
+  instructions: SERVER_INSTRUCTIONS,
 });
 
 server.registerTool(
@@ -291,55 +307,171 @@ server.registerTool(
   "get_transaction",
   {
     description:
-      "Retrieve a single transaction by ID with full detail: account, vendor, department, journal entry, amounts (debit/credit in native and book currencies), dates, tags, and linked invoices/bills.",
+      "Fetch a single chart-transaction line (one debit OR one credit leg) by its canonical numeric id. The response includes `journal` (parent journal entry id) and `journalOrder` (the UI's \"Transaction #…\" display string). Do NOT pass a journal entry id from a URL like `/v2/accounting/journal-entry/{id}` — use `get_journal_entry` for those.",
     inputSchema: {
-      id: z.number().describe("The transaction ID"),
+      id: z.number().describe("Numeric chart-transaction id (from get_transactions, or from a journal entry's transactions[].id). NOT the journal entry id from URLs."),
     },
   },
   async ({ id }) => {
     try {
       const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve2({ id });
-      const t = resp.data;
-
-      const shaped = {
-        id: t.id,
-        postedAt: t.posted_at,
-        accountName: t.account_name,
-        accountNumber: t.account_number,
-        accountType: t.account_type,
-        accountSubtype: t.account_subtype,
-        vendorName: t.vendor_name,
-        departmentName: t.department_name,
-        entityName: t.entity_name,
-        journalMemo: t.journal_memo,
-        journalType: t.journal_type_name ?? t.journal_type,
-        debitAmount: t.debit_amount != null ? Number(t.debit_amount) : null,
-        creditAmount: t.credit_amount != null ? Number(t.credit_amount) : null,
-        amount: Number(t.amount ?? 0),
-        currency: t.currency,
-        exchangeRate: t.exchange_rate,
-        merchantName: t.merchant_name,
-        bankDescription: t.bank_description,
-        note: t.note,
-        invoiceId: t.invoice_id || null,
-        invoiceNumber: t.invoice_number || null,
-        billId: t.bill_id || null,
-        billNumber: t.bill_number || null,
-        tags: Array.isArray(t.tags) ? t.tags.map((tag: any) => tag.name ?? tag) : [],
-        needsReview: t.needs_review ?? false,
-        hasMatches: t.has_matches ?? false,
-        suggestedAccountName: t.suggested_account_name,
-        suggestedAccountNumber: t.suggested_account_number,
-        balanceAfterTransaction: t.balance_after_transaction,
-        createdAt: t.created_at,
-        lastModifiedAt: t.last_modified_at,
-      };
-
+      const shaped = shapeChartTransaction(resp.data);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(shaped, null, 2) }],
       };
     } catch (err) {
       return errorResult("get_transaction", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_journal_entry",
+  {
+    description:
+      "Fetch a full journal entry (all debit/credit legs) by its canonical numeric id (the integer in URLs like `/v2/accounting/journal-entry/{id}`). The response includes `order` — the printed display string shown in the UI as \"Transaction #0099999\". For a single line-item, use `get_transaction` instead.",
+    inputSchema: {
+      id: z.number().describe("Numeric journal entry id (URL id). NOT the display \"Transaction #…\" number (that's the `order` string)."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (coreAccountingApi as any).coaApiJournalEntryRetrieve({ id });
+      const shaped = shapeJournalEntry(resp.data);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shaped, null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_journal_entry", err);
+    }
+  }
+);
+
+// --- Single-record fetch-by-id tools ---
+// See SERVER_INSTRUCTIONS for the canonical id vs. printed display-number rules.
+
+server.registerTool(
+  "get_invoice",
+  {
+    description:
+      "Fetch a single invoice by its canonical numeric id (the integer in URLs like /v2/accounting/invoices/{id}, or in `invoiceId`/`invoice_id` FKs returned by other tools). Do NOT pass the printed `invoiceNumber` like \"INV-0042\" — use `get_invoices` with q=\"INV-0042\" for that. Returns line items, amounts, client/contract refs.",
+    inputSchema: {
+      id: z.number().describe("Numeric invoice id (URL id). NOT the printed invoiceNumber like \"INV-0042\"."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (arApi as any).coaApiV1InvoiceRetrieve({ id });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shapeInvoiceDetail(resp.data), null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_invoice", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_bill",
+  {
+    description:
+      "Fetch a single bill (AP) by its canonical numeric id (the integer in URLs like /v2/accounting/bills/{id}, or in `billId`/`bill_id` FKs returned by other tools). Do NOT pass the printed `billNumber` (which often looks like \"INV-…\" even though it's a bill, not an invoice) — use `get_bills` with q=\"…\" for that. The URL path `/bills/…` vs `/invoices/…` is the only reliable disambiguator between an invoice and a bill with identical-looking numbers.",
+    inputSchema: {
+      id: z.number().describe("Numeric bill id (URL id). NOT the printed billNumber."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (apApi as any).coaApiV1BillRetrieve2({ id });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shapeBillDetail(resp.data), null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_bill", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_credit_memo",
+  {
+    description:
+      "Fetch a single credit memo (AR credit) by its canonical numeric id (the integer in URLs like /v2/accounting/credit-memos/{id}). Do NOT pass the printed `creditMemoNumber` like \"CN-105\" — use `get_credit_memos` with q=\"CN-105\" for that.",
+    inputSchema: {
+      id: z.number().describe("Numeric credit memo id (URL id). NOT the printed creditMemoNumber like \"CN-105\"."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (arApi as any).coaApiV1CreditMemoRetrieve({ id });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shapeCreditMemoDetail(resp.data), null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_credit_memo", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_debit_memo",
+  {
+    description:
+      "Fetch a single debit memo (AP debit) by its canonical numeric id (the integer in URLs like /v2/accounting/debit-memos/{id}). Do NOT pass the printed `debitMemoNumber` — there is no search-by-number endpoint for debit memos yet.",
+    inputSchema: {
+      id: z.number().describe("Numeric debit memo id (URL id). NOT the printed debitMemoNumber."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (apApi as any).coaApiV1DebitMemoRetrieve({ id });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shapeDebitMemoDetail(resp.data), null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_debit_memo", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_contract",
+  {
+    description:
+      "Fetch a single revenue contract by its canonical numeric id (the integer in URLs like /v2/revenue/contracts/{id}, or in `contractId`/`contract` FKs returned by other tools). Contracts have no Campfire-issued printed number; they may have a `dealName`/`dealId` from an external CRM (HubSpot), which is informational only. Use `get_contracts` to list/search.",
+    inputSchema: {
+      id: z.number().describe("Numeric contract id (URL id). NOT a CRM dealId (that's a separate external string)."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (revenueApi as any).rrApiV1ContractsRetrieve({ id });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shapeContractDetail(resp.data), null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_contract", err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_customer",
+  {
+    description:
+      "Fetch a single customer by its canonical numeric id (the integer in URLs like /v2/revenue/customers/{id}, or in `clientId`/`client`/`customerId` FKs returned by other tools). Customers have no printed number — identity is the `name` field. Use `get_customers` with q=\"…\" to look up by name.",
+    inputSchema: {
+      id: z.number().describe("Numeric customer id (URL id). NOT the customer's name."),
+    },
+  },
+  async ({ id }) => {
+    try {
+      const resp = await (revenueApi as any).rrApiV1CustomersRetrieve({ id });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(shapeCustomerDetail(resp.data), null, 2) }],
+      };
+    } catch (err) {
+      return errorResult("get_customer", err);
     }
   }
 );
@@ -548,7 +680,7 @@ server.registerTool(
   "get_contracts",
   {
     description:
-      "Retrieve revenue recognition contracts with enriched summary: recognized vs remaining revenue, per-contract totals and percentages. Use detail to control response size: summary (compact), normal (default, includes deal/financial/department info), full (adds auto-renew, evergreen, tags).",
+      "List/search revenue recognition contracts with enriched summary: recognized vs remaining revenue, per-contract totals and percentages. Use detail to control response size: summary (compact), normal (default, includes deal/financial/department info), full (adds auto-renew, evergreen, tags). For a single contract by id, use `get_contract`.",
     inputSchema: {
       q: z.string().optional().describe("Search query"),
       clientId: z.number().optional().describe("Filter by client ID"),
@@ -580,7 +712,7 @@ server.registerTool(
   "get_customers",
   {
     description:
-      "Retrieve contract customers with financial summaries: total revenue, MRR, billed/unbilled/outstanding amounts, and contract counts per customer. Use detail to control response size: summary (compact), normal (default, includes addresses/contacts/notes), full (adds tax/compliance fields).",
+      "List/search customers with financial summaries: total revenue, MRR, billed/unbilled/outstanding amounts, and contract counts per customer. Use detail to control response size: summary (compact), normal (default, includes addresses/contacts/notes), full (adds tax/compliance fields). For a single customer by id, use `get_customer`.",
     inputSchema: {
       limit: z.number().optional().describe("Max results (default: 50)"),
       offset: z.number().optional().describe("Pagination offset"),
@@ -640,7 +772,7 @@ server.registerTool(
   "get_invoices",
   {
     description:
-      "Retrieve invoices with filtering by status, date range, client, and search query. Returns summary with totals and breakdown by status. Use detail to control response size: summary (compact), normal (default, includes contract/dates/addresses), full (adds line items, payments, emails). Status values: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, sent, or aging buckets (1_30, 31_60, 61_90, 91_120, over_120).",
+      "List/search invoices with filtering by status, date range, client, and search query (`q` matches invoiceNumber, e.g. q=\"INV-0042\"). Returns summary with totals and breakdown by status. Use detail to control response size: summary (compact), normal (default, includes contract/dates/addresses), full (adds line items, payments, emails). Status values: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, sent, or aging buckets (1_30, 31_60, 61_90, 91_120, over_120). For a single invoice by id, use `get_invoice`.",
     inputSchema: {
       status: z.string().optional().describe("Filter by status: unpaid, paid, partially_paid, past_due, current, voided, uncollectible, 1_30, 31_60, 61_90, 91_120, over_120"),
       startDate: z.string().optional().describe("Filter invoices on or after this date (YYYY-MM-DD)"),
@@ -804,7 +936,7 @@ server.registerTool(
   "get_bills",
   {
     description:
-      "Retrieve bills filtered by status, vendor, date range, and search query. Returns summary with totals by status and vendor. Use detail to control response size: summary (compact), normal (default, includes department/PO/currency/address), full (adds line items, payments, attachments). Status values: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120.",
+      "List/search bills filtered by status, vendor, date range, and search query (`q` matches billNumber, e.g. q=\"INV-0171\"). Returns summary with totals by status and vendor. Use detail to control response size: summary (compact), normal (default, includes department/PO/currency/address), full (adds line items, payments, attachments). Status values: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120. For a single bill by id, use `get_bill`.",
     inputSchema: {
       status: z.string().optional().describe("Filter by status: unpaid, paid, partially_paid, past_due, current, open, voided, payment_pending, payment_not_found, 1_30, 31_60, 61_90, 91_120, over_120"),
       vendorId: z.number().optional().describe("Filter by vendor ID"),
@@ -846,7 +978,7 @@ server.registerTool(
   "get_credit_memos",
   {
     description:
-      "Retrieve credit memos with filtering by status, date range, client, and search query. Returns summary with totals, amount used/remaining, and breakdown by status. Status values: open, partially_used, used, voided.",
+      "List/search credit memos with filtering by status, date range, client, and search query (`q` matches creditMemoNumber, e.g. q=\"CN-105\"). Returns summary with totals, amount used/remaining, and breakdown by status. Status values: open, partially_used, used, voided. For a single credit memo by id, use `get_credit_memo`.",
     inputSchema: {
       status: z.enum(["open", "partially_used", "used", "voided"]).optional()
         .describe("Filter by status: open, partially_used, used, voided"),

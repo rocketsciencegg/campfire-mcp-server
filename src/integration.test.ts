@@ -285,6 +285,61 @@ describe("get_transaction", () => {
     expect(t).toHaveProperty("debit_amount");
     expect(t).toHaveProperty("credit_amount");
   });
+
+  it("response includes the dual-ID fields (journal, journal_order, transaction_id)", async () => {
+    const listResp = await (coreAccountingApi as any).coaApiTransactionRetrieve({
+      params: { limit: 1 },
+    });
+    const raw = extractRaw(listResp);
+    if (raw.length === 0) return;
+
+    const resp = await (coreAccountingApi as any).coaApiTransactionRetrieve2({ id: raw[0].id });
+    const t = resp.data;
+
+    // These are the fields the MCP tool now surfaces so callers can relate
+    // a chart-line back to the journal entry shown in Campfire URLs.
+    expect(typeof t.journal).toBe("number");
+    expect(typeof t.journal_order).toBe("string");
+    expect(typeof t.transaction_id).toBe("string");
+  });
+});
+
+// ─── 8b. get_journal_entry (single, via URL ID) ───────────────────────────
+
+describe("get_journal_entry", () => {
+  it("retrieves a journal entry by ID and returns nested transaction lines", async () => {
+    const listResp = await (coreAccountingApi as any).coaApiJournalEntryList({ limit: 1 });
+    const raw = extractRaw(listResp);
+    if (raw.length === 0) return;
+
+    const jeId = raw[0].id;
+    const resp = await (coreAccountingApi as any).coaApiJournalEntryRetrieve({ id: jeId });
+    const j = resp.data;
+
+    expect(j.id).toBe(jeId);
+    expect(typeof j.order).toBe("string"); // user-visible "Transaction #…" number
+    expect(Array.isArray(j.transactions)).toBe(true);
+    expect(j.transactions.length).toBeGreaterThan(0);
+  });
+
+  it("chart transaction's journal/order round-trips against its parent journal entry", async () => {
+    // Fetch a journal entry, then fetch one of its chart transactions by id
+    // separately, and verify the two IDs point to each other consistently.
+    const listResp = await (coreAccountingApi as any).coaApiJournalEntryList({ limit: 5 });
+    const list = extractRaw(listResp);
+    const je = list.find((j: any) => Array.isArray(j.transactions) && j.transactions.length > 0);
+    if (!je) return;
+
+    const jeResp = await (coreAccountingApi as any).coaApiJournalEntryRetrieve({ id: je.id });
+    const entry = jeResp.data;
+    const firstTxn = entry.transactions[0];
+
+    const txResp = await (coreAccountingApi as any).coaApiTransactionRetrieve2({ id: firstTxn.id });
+    const tx = txResp.data;
+
+    expect(tx.journal).toBe(entry.id);
+    expect(tx.journal_order).toBe(entry.order);
+  });
 });
 
 // ─── 9. get_transactions ───────────────────────────────────────────────────
@@ -814,3 +869,78 @@ describe("get_bills", () => {
     expect(Array.isArray(extractRaw(resp))).toBe(true);
   });
 });
+
+// ─── Single-record fetch-by-id tools (dual-ID support) ────────────────────
+//
+// Each round-trip test: list the entity to discover a real id, fetch by id,
+// assert the id echoes and the printed display string field is present.
+
+describe("get_invoice (fetch-by-id)", () => {
+  it("round-trips id and exposes invoice_number display string", async () => {
+    const list = await (arApi as any).coaApiV1InvoiceList({ limit: 1 });
+    const raw = extractRaw(list);
+    if (raw.length === 0) return;
+    const resp = await (arApi as any).coaApiV1InvoiceRetrieve({ id: raw[0].id });
+    const d = resp.data;
+    expect(d.id).toBe(raw[0].id);
+    expect(typeof d.invoice_number).toBe("string");
+    expect(d.invoice_number.length).toBeGreaterThan(0);
+  });
+});
+
+describe("get_bill (fetch-by-id)", () => {
+  it("round-trips id and exposes bill_number display string", async () => {
+    const list = await (apApi as any).coaApiV1BillRetrieve({ limit: 1 });
+    const raw = extractRaw(list);
+    if (raw.length === 0) return;
+    const resp = await (apApi as any).coaApiV1BillRetrieve2({ id: raw[0].id });
+    const d = resp.data;
+    expect(d.id).toBe(raw[0].id);
+    expect(typeof d.bill_number).toBe("string");
+  });
+});
+
+describe("get_credit_memo (fetch-by-id)", () => {
+  it("round-trips id and exposes credit_memo_number display string", async () => {
+    const list = await (arApi as any).coaApiV1CreditMemoList({ limit: 1 });
+    const raw = extractRaw(list);
+    if (raw.length === 0) return;
+    const resp = await (arApi as any).coaApiV1CreditMemoRetrieve({ id: raw[0].id });
+    const d = resp.data;
+    expect(d.id).toBe(raw[0].id);
+    expect(typeof d.credit_memo_number).toBe("string");
+  });
+});
+
+describe("get_contract (fetch-by-id)", () => {
+  it("round-trips id and exposes external dealId as a separate string", async () => {
+    const list = await (revenueApi as any).listContracts({ limit: 1 });
+    const raw = extractRaw(list);
+    if (raw.length === 0) return;
+    const resp = await (revenueApi as any).rrApiV1ContractsRetrieve({ id: raw[0].id });
+    const d = resp.data;
+    expect(d.id).toBe(raw[0].id);
+    // Contracts have no printed campfire number. deal_id (if present) is a string
+    // from an external CRM, distinct from the numeric campfire id.
+    if (d.deal_id != null) {
+      expect(typeof d.deal_id).toBe("string");
+      expect(typeof d.id).toBe("number");
+    }
+  });
+});
+
+describe("get_customer (fetch-by-id)", () => {
+  it("round-trips id; customers identify by name, not a printed number", async () => {
+    const list = await (revenueApi as any).rrApiV1CustomersList({ limit: 1 });
+    const raw = extractRaw(list);
+    if (raw.length === 0) return;
+    const resp = await (revenueApi as any).rrApiV1CustomersRetrieve({ id: raw[0].id });
+    const d = resp.data;
+    expect(d.id).toBe(raw[0].id);
+    expect(typeof d.name).toBe("string");
+  });
+});
+
+// NOTE: no integration test for get_debit_memo — user tenant currently has no
+// debit memos and there is no SDK list method to discover one dynamically.
+// The unit test using the fuzzed debit-memo.json fixture covers the shape.
