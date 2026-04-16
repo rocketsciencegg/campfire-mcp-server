@@ -82,7 +82,7 @@ const SERVER_INSTRUCTIONS = `Campfire identifier rules (applies to every tool):
 function createServer() {
 const server = new McpServer({
   name: "campfire-mcp-server",
-  version: "2.4.0",
+  version: "2.5.0",
 }, {
   instructions: SERVER_INSTRUCTIONS,
 });
