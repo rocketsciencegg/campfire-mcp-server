@@ -2737,6 +2737,71 @@ describe("shapeCustomerDetail", () => {
   });
 });
 
+// Empty-input coverage — each shaper must tolerate sparse/missing input
+// without throwing. This hits the fallback branches (`?? null`, non-array
+// handling) that the rich fixtures don't exercise.
+describe("shapers tolerate sparse input", () => {
+  it("shapeChartTransaction on {}", () => {
+    const out = shapeChartTransaction({});
+    expect(out.id).toBeUndefined();
+    expect(out.journal).toBeNull();
+    expect(out.tags).toEqual([]);
+  });
+  it("shapeJournalEntry on {}", () => {
+    const out = shapeJournalEntry({});
+    expect(out.order).toBeNull();
+    expect(out.transactions).toEqual([]);
+  });
+  it("shapeInvoiceDetail on {}", () => {
+    const out = shapeInvoiceDetail({});
+    expect(out.invoiceNumber).toBeNull();
+    expect(out.clientId).toBeNull();
+    expect(out.totalAmount).toBeNull();
+    expect(out.lines).toEqual([]);
+  });
+  it("shapeBillDetail on {}", () => {
+    const out = shapeBillDetail({});
+    expect(out.billNumber).toBeNull();
+    expect(out.vendorId).toBeNull();
+    expect(out.lines).toEqual([]);
+  });
+  it("shapeCreditMemoDetail on {}", () => {
+    const out = shapeCreditMemoDetail({});
+    expect(out.creditMemoNumber).toBeNull();
+    expect(out.clientId).toBeNull();
+    expect(out.lines).toEqual([]);
+  });
+  it("shapeDebitMemoDetail on {}", () => {
+    const out = shapeDebitMemoDetail({});
+    expect(out.debitMemoNumber).toBeNull();
+    expect(out.vendorId).toBeNull();
+    expect(out.lines).toEqual([]);
+  });
+  it("shapeContractDetail on {}", () => {
+    const out = shapeContractDetail({});
+    expect(out.dealName).toBeNull();
+    expect(out.clientId).toBeNull();
+    expect(out.totalContractValue).toBeNull();
+    expect(out.tags).toEqual([]);
+  });
+  it("shapeCustomerDetail on {}", () => {
+    const out = shapeCustomerDetail({});
+    expect(out.name).toBeNull();
+    expect(out.totalRevenue).toBe(0);
+    expect(out.contacts).toEqual([]);
+  });
+});
+
+// Line-level coverage for shapeInvoiceDetail lines with missing optional fields
+describe("shapeInvoiceDetail line items tolerate missing fields", () => {
+  it("line with only id still shapes without throwing", () => {
+    const out = shapeInvoiceDetail({ lines: [{ id: 99 }] });
+    expect(out.lines[0].id).toBe(99);
+    expect(out.lines[0].quantity).toBeNull();
+    expect(out.lines[0].amount).toBeNull();
+  });
+});
+
 // The FK-follow contract: an invoice's clientId is the same kind of id a customer fixture carries.
 // This is the "follow the FK" flow an LLM should be able to do without guessing.
 describe("Cross-entity ID follow flow", () => {
